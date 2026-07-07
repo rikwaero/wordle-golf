@@ -73,6 +73,8 @@ def parse_wordle_text(text):
 # ----------------------------------------------------
 # 3. STATE MANAGEMENT (LOCAL FILE DATABASE SYSTEM)
 # ----------------------------------------------------
+
+DB_FILE = "golf_history.json"
 def load_db():
     """Loads all current round and historical data from the JSON file."""
     if os.path.exists(DB_FILE):
