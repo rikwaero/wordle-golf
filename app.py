@@ -270,24 +270,28 @@ else:
     p1 = active_players[0]
     p2 = active_players[1] if len(active_players) > 1 else None
     
-    # Calculate matrix limits safely
+    # Calculate matrix limits safely depending on whether 1 or 2 players exist
     p1_holes = [int(k) for k in st.session_state.scores[p1].keys()]
     p2_holes = [int(k) for k in st.session_state.scores[p2].keys()] if p2 else []
     max_submitted_hole = max(max(p1_holes) if p1_holes else 1, max(p2_holes) if p2_holes else 1)
-    
+
     # 1. Isolation Math Matrix (Common holes only)
     reg_completed_holes = []
-    reg_totals = {p1: 0, p2: 0}
+    reg_totals = {p1: 0}
+    if p2:
+        reg_totals[p2] = 0
     
     for h in range(1, 19):
         s1 = st.session_state.scores[p1].get(str(h))
-        s2 = st.session_state.scores[p2].get(str(h))
-        if s1 is not None and s2 is not None:
+        s2 = st.session_state.scores[p2].get(str(h)) if p2 else None
+        
+        # Only accumulate scores if BOTH players have logged a value for this hole
+        if s1 is not None and s2 is not None and p2:
             reg_completed_holes.append(h)
             reg_totals[p1] += s1
             reg_totals[p2] += s2
 
-    regulation_finished = len(reg_completed_holes) == 18
+    regulation_finished = len(reg_completed_holes) == 18 and p2 is not None
     
     # 2. Playoff Sudden Death Matrix Engine
     playoff_active = False
