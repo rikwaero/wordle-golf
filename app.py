@@ -591,7 +591,7 @@ else:
     p1_holes = [int(k) for k in st.session_state.scores[p1_name].keys()]
     p2_holes = [int(k) for k in st.session_state.scores[p2_name].keys()] if p2 else []
     all_holes_list = p1_holes + p2_holes
-    max_hole = max(max_holes_list) if all_holes_list else 18
+    max_hole = max(all_holes_list) if all_holes_list else 18
     limit_holes = max(18, max_hole)
 
     # Compile the interactive HTML row data dictionary for each competitor
