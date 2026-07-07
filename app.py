@@ -185,7 +185,7 @@ with st.sidebar.expander("📬 Dump Chat Thread Data Here"):
     bulk_player = st.selectbox("Sender of this Chat Dump", st.session_state.player_profiles, key="bulk_p_sel")
     bulk_text = st.text_area("Paste Chat Text Content", placeholder="Dan\nWordle 1,816 3/6*...\nArchive June 3...", height=250)
     
-     if st.button("⚡ Parse & Save All Historical Text"):
+    if st.button("⚡ Parse & Save All Historical Text"):
         if not bulk_text:
             st.error("Paste text before compiling!")
         else:
