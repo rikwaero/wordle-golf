@@ -1,4 +1,4 @@
-pythonimport re
+import re
 import streamlit as st
 import pandas as pd
 
@@ -69,209 +69,245 @@ def parse_wordle_text(text):
     return None, None
 
 # ----------------------------------------------------
-# 3. STATE MANAGEMENT
+# 3. STATE MANAGEMENT (LOCAL FILE DATABASE SYSTEM)
 # ----------------------------------------------------
+def load_db():
+    """Loads all current round and historical data from the JSON file."""
+    if os.path.exists(DB_FILE):
+        try:
+            with open(DB_FILE, "r") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    # Default schema if file doesn't exist
+    return {"current_round": {}, "history": []}
+
+def save_db(data):
+    """Saves the tracking data structurally back to disk."""
+    with open(DB_FILE, "w") as f:
+        json.dump(data, f, indent=4)
+
+# Initialize Session State from DB
+db_data = load_db()
 if "scores" not in st.session_state:
-    st.session_state.scores = {}
+    st.session_state.scores = db_data.get("current_round", {})
+if "history" not in st.session_state:
+    st.session_state.history = db_data.get("history", [])
 
 # ----------------------------------------------------
-# 4. SIDEBAR INPUT
+# 4. SIDEBAR IDENTITY & USER INPUT
 # ----------------------------------------------------
+st.sidebar.header("👤 Player Authentication")
+
+# Dropdown to ensure the app cleanly segregates the two players
+player_identity = st.sidebar.selectbox(
+    "Who is uploading this score?",
+    ["Player 1", "Player 2"],
+    help="Select your designated profile name to ensure proper tracking alignment."
+)
+
+st.sidebar.write("---")
 st.sidebar.header("🎯 Post Scorecard")
-player_name = st.sidebar.text_input("Golfer Name", placeholder="e.g., Tiger").strip()
 wordle_paste = st.sidebar.text_area("Paste Wordle Share Text", placeholder="Wordle 1,843 3/6...", height=120)
 
-if st.sidebar.button("🚀 Post Score to Clubhouse"):
-    if not player_name or not wordle_paste:
-        st.sidebar.error("Fill out both fields first!")
+if st.sidebar.button("🚀 Post Score to Database"):
+    if not wordle_paste:
+        st.sidebar.error("Please paste your Wordle snippet first!")
     else:
         w_num, strokes = parse_wordle_text(wordle_paste)
         if w_num is not None:
             _, hole = get_round_start_and_hole(w_num)
             
-            if player_name not in st.session_state.scores:
-                st.session_state.scores[player_name] = {}
-                
-            st.session_state.scores[player_name][hole] = strokes
+            # Update local RAM session state
+            if player_identity not in st.session_state.scores:
+                st.session_state.scores[player_identity] = {}
+            
+            # JSON keys must be strings, converting hole to string for reliability
+            st.session_state.scores[player_identity][str(hole)] = strokes
+            
+            # Commit instantly to file storage database
+            current_db = load_db()
+            current_db["current_round"] = st.session_state.scores
+            save_db(current_db)
             
             shoutout = SCORE_NAMES.get(strokes, "🎯 SCORE")
-            st.toast(f"📢 {player_name} dropped a {shoutout} on Hole {hole}!", icon="⛳")
+            st.toast(f"📢 {player_identity} secured a {shoutout} on Hole {hole}!", icon="⛳")
             st.sidebar.success(f"Logged Hole {hole} (Wordle {w_num})")
+            st.rerun()
         else:
-            st.sidebar.error("Could not read Wordle layout. Check your clipboard copy!")
+            st.sidebar.error("Could not parse Wordle text structure. Check your clipboard syntax!")
 
 # ----------------------------------------------------
-# 5. DATA ANALYSIS & STATE COMPUTATION
+# 5. DATA COMPUTATION & DYNAMICS
 # ----------------------------------------------------
-if st.session_state.scores:
-    all_players = list(st.session_state.scores.keys())
+active_players = list(st.session_state.scores.keys())
+
+if len(active_players) < 2:
+    st.info("👋 Waiting for both players to submit at least one score to activate the live scoreboard boards.")
+else:
+    p1, p2 = active_players[0], active_players[1]
     
-    if len(all_players) < 2:
-        st.info("👋 Waiting for both golfers to log a score to map out match dynamics.")
-    else:
-        p1, p2 = all_players[0], all_players[1]
-        
-        # Track max hole submitted anywhere
-        p1_holes = st.session_state.scores[p1].keys()
-        p2_holes = st.session_state.scores[p2].keys()
-        max_submitted_hole = max(max(p1_holes) if p1_holes else 1, max(p2_holes) if p2_holes else 1)
-        
-        # 1. Regulation Cumulative Calculations (Only holes completed by BOTH players)
-        reg_completed_holes = []
-        reg_totals = {p1: 0, p2: 0}
-        
-        for h in range(1, 19):
-            s1 = st.session_state.scores[p1].get(h)
-            s2 = st.session_state.scores[p2].get(h)
-            if s1 is not None and s2 is not None:
-                reg_completed_holes.append(h)
-                reg_totals[p1] += s1
-                reg_totals[p2] += s2
+    p1_holes = [int(k) for k in st.session_state.scores[p1].keys()]
+    p2_holes = [int(k) for k in st.session_state.scores[p2].keys()]
+    max_submitted_hole = max(max(p1_holes) if p1_holes else 1, max(p2_holes) if p2_holes else 1)
+    
+    # 1. Isolation Math Matrix (Common holes only)
+    reg_completed_holes = []
+    reg_totals = {p1: 0, p2: 0}
+    
+    for h in range(1, 19):
+        s1 = st.session_state.scores[p1].get(str(h))
+        s2 = st.session_state.scores[p2].get(str(h))
+        if s1 is not None and s2 is not None:
+            reg_completed_holes.append(h)
+            reg_totals[p1] += s1
+            reg_totals[p2] += s2
 
-        regulation_finished = len(reg_completed_holes) == 18
-        
-        # 2. Playoff Logic Matrix
-        playoff_active = False
-        playoff_winner = None
-        current_playoff_hole = 19
-        
-        if regulation_finished and reg_totals[p1] == reg_totals[p2]:
-            playoff_active = True
-            while True:
-                s1_p = st.session_state.scores[p1].get(current_playoff_hole)
-                s2_p = st.session_state.scores[p2].get(current_playoff_hole)
-                
-                if s1_p is not None and s2_p is not None:
-                    if s1_p < s2_p:
-                        playoff_winner = p1
-                        break
-                    elif s2_p < s1_p:
-                        playoff_winner = p2
-                        break
-                    current_playoff_hole += 1
-                else:
+    regulation_finished = len(reg_completed_holes) == 18
+    
+    # 2. Playoff Sudden Death Matrix Engine
+    playoff_active = False
+    playoff_winner = None
+    current_playoff_hole = 19
+    
+    if regulation_finished and reg_totals[p1] == reg_totals[p2]:
+        playoff_active = True
+        while True:
+            s1_p = st.session_state.scores[p1].get(str(current_playoff_hole))
+            s2_p = st.session_state.scores[p2].get(str(current_playoff_hole))
+            
+            if s1_p is not None and s2_p is not None:
+                if s1_p < s2_p:
+                    playoff_winner = p1
                     break
-
-        # ----------------------------------------------------
-        # 6. DYNAMIC COMMENTARY GENERATOR
-        # ----------------------------------------------------
-        st.header("🎙️ Live Broadcast Booth")
-        if st.button("🎤 Get Live Broadcast Commentary"):
-            comm_list = []
-            
-            # Context-based analysis
-            if playoff_active:
-                comm_list.append(f"🎙️ 'We are deep into unexpected drama here at the Wordle Pro Tour! Regulation play couldn't separate them, and we are officially out on the links in a sudden-death playoff. Total ice in the veins is required right now.'")
-                s1_p = st.session_state.scores[p1].get(current_playoff_hole)
-                s2_p = st.session_state.scores[p2].get(current_playoff_hole)
-                if (s1_p is not None and s2_p is None) or (s2_p is not None and s1_p is None):
-                    lone_player = p1 if s1_p is not None else p2
-                    comm_list.append(f"🎙️ 'The pressure is mounting. {lone_player} has already thrown down an early marker on Playoff Hole {current_playoff_hole}. The response will dictate the tournament!'")
+                elif s2_p < s1_p:
+                    playoff_winner = p2
+                    break
+                current_playoff_hole += 1
             else:
-                comm_list.append(f"🎙️ 'Welcome back to the gallery. We are analyzing a tense round of regulation action across the standard 18-hole block.'")
-                
-                # Check for single-player pacing leads
-                if len(p1_holes) != len(p2_holes):
-                    pacing_leader = p1 if len(p1_holes) > len(p2_holes) else p2
-                    comm_list.append(f"🎙️ 'Fascinating pacing dynamic today. {pacing_leader} is moving rapidly through the course, putting early pressure on the clubhouse board while their opponent plays catch-up.'")
-                
-                # Analyze aggregate standing
-                diff = reg_totals[p1] - reg_totals[p2]
-                if diff == 0:
-                    if len(reg_completed_holes) > 0:
-                        comm_list.append(f"🎙️ 'Looking at the official locked scores, it's a dead heat! They are locked completely level over the {len(reg_completed_holes)} holes verified by both scorecards.'")
-                    else:
-                        comm_list.append("🎙️ 'Early stages yet. The scorecards are clean, and both players are searching for an opening line.'")
-                else:
-                    leader = p2 if diff > 0 else p1
-                    chaser = p1 if diff > 0 else p2
-                    comm_list.append(f"🎙️ 'Through the verified shared holes, **{leader}** currently holds the structural advantage, forcing **{chaser}** into an aggressive chasing profile if they want to claw back.'")
-                    
-                # Look for exceptional highlight scores
-                all_combined_scores = list(st.session_state.scores[p1].values()) + list(st.session_state.scores[p2].values())
-                if -2 in all_combined_scores or -3 in all_combined_scores:
-                    comm_list.append("🎙️ 'The crowds went absolutely wild earlier today—we saw brilliant sub-par accuracy out there. True championship pedigree execution.'")
-                    
-            st.markdown(f"""
-            <div class="commentary-box">
-                {'<br><br>'.join(comm_list)}
-            </div>
-            """, unsafe_allow_html=True)
-            
+                break
+
+    # ----------------------------------------------------
+    # 6. BROADCAST COMMENTARY BOOTH
+    # ----------------------------------------------------
+    st.header("🎙️ Live Broadcast Booth")
+    if st.button("🎤 Get Live Broadcast Commentary"):
+        comm_list = []
+        if playoff_active:
+            comm_list.append(f"🎙️ 'Absolute deadlock! Regulation play couldn't split them. We are out on the sudden-death track.'")
+        else:
+            comm_list.append(f"🎙️ 'Welcome to the gallery. We are monitoring a pristine 18-hole regulation round context.'")
+            diff = reg_totals[p1] - reg_totals[p2]
+            if diff == 0:
+                comm_list.append(f"🎙️ 'Through the synced cards, it is an absolute tie across {len(reg_completed_holes)} balanced holes!'")
+            else:
+                leader = p2 if diff > 0 else p1
+                chaser = p1 if diff > 0 else p2
+                comm_list.append(f"🎙️ 'With verified data, **{leader}** holds a tight grip on the match projection, putting pressure on **{chaser}**.'")
+        st.markdown(f'<div class="commentary-box">{"<br><br>".join(comm_list)}</div>', unsafe_allow_html=True)
         st.write("---")
 
-        # ----------------------------------------------------
-        # 7. WINNER CELEBRATION BANNERS
-        # ----------------------------------------------------
-        if playoff_winner:
-            champ, loser = playoff_winner, (p1 if playoff_winner == p2 else p2)
+    # ----------------------------------------------------
+    # 7. CHAMPIONSHIP RESOLUTIONS
+    # ----------------------------------------------------
+    round_ended = False
+    winner_name = None
+    summary_msg = ""
+    
+    if playoff_winner:
+        round_ended = True
+        winner_name = playoff_winner
+        loser_name = p1 if playoff_winner == p2 else p2
+        summary_msg = f"{winner_name} defeated {loser_name} in Sudden Death Playoffs."
+        st.balloons()
+        st.markdown(f'<div class="winner-banner">🏆 SUDDEN DEATH CHAMPION: {winner_name.upper()}! 🏆</div>', unsafe_allow_html=True)
+        st.success(f"👏 **Pure ice in your veins, {winner_name}!**")
+        
+    elif regulation_finished and not playoff_active:
+        if reg_totals[p1] != reg_totals[p2]:
+            round_ended = True
+            winner_name = p1 if reg_totals[p1] < reg_totals[p2] else p2
+            loser_name = p2 if winner_name == p1 else p1
+            summary_msg = f"{winner_name} ({reg_totals[winner_name]:+}) def. {loser_name} ({reg_totals[loser_name]:+})"
             st.balloons()
-            st.markdown(f'<div class="winner-banner">🏆 SUDDEN DEATH CHAMPION: {champ.upper()}! 🏆</div>', unsafe_allow_html=True)
-            st.success(f"👏 **Unbelievable composure, {champ}!** You locked it down when the margin for error was completely zero!")
-            st.info(f"🩹 **Tough break, {loser}.** To lose on playoff territory is absolute heartbreak. Your revenge tour starts tomorrow.")
-            
-        elif regulation_finished and not playoff_active:
-            if reg_totals[p1] != reg_totals[p2]:
-                champ = p1 if reg_totals[p1] < reg_totals[p2] else p2
-                loser = p2 if champ == p1 else p1
-                st.balloons()
-                st.markdown(f'<div class="winner-banner">👑 TOURNAMENT CHAMPION: {champ.upper()}! 👑</div>', unsafe_allow_html=True)
-                st.success(f"🏆 **Great tournament, {champ}!** Slapping on the green jacket after a stellar display over 18 holes!")
-                st.info(f"🩹 **Console tent for {loser}:** A few bad bounces out there on the back nine. Reset your letters and challenge them again on the next even track.")
+            st.markdown(f'<div class="winner-banner">👑 TOURNAMENT CHAMPION: {winner_name.upper()}! 👑</div>', unsafe_allow_html=True)
+            st.success(f"🏆 **Put on the green jacket, {winner_name}!**")
 
-        # ----------------------------------------------------
-        # 8. SCANNABLE TOURNAMENT CARDS
-        # ----------------------------------------------------
-        st.header("🏆 Live Standings")
-        col1, col2 = st.columns(2)
+    # ----------------------------------------------------
+    # 8. MATCH OVERVIEW TOURNAMENT CARDS
+    # ----------------------------------------------------
+    st.header("🏆 Live Standings")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        diff = reg_totals[p1] - reg_totals[p2]
+        if diff < 0:
+            leader_str = f"⚡ **{p1}** leads by **{abs(diff)}** strokes (on synced holes)"
+        elif diff > 0:
+            leader_str = f"⚡ **{p2}** leads by **{abs(diff)}** strokes (on synced holes)"
+        else:
+            leader_str = "⚖️ **All Square!** Level scoreboards on verified entries."
+            
+        card_style = "metric-card playoff-card" if playoff_active else "metric-card"
+        st.markdown(f'<div class="{card_style}"><h4 style="margin:0; color:white;">Synced Leader</h4><p style="margin:5px 0 0 0; color:#cbd5e1; font-size:16px;">{leader_str}</p></div>', unsafe_allow_html=True)
+
+    with col2:
+        status_text = "🚨 PLAYOFFS ACTIVE" if playoff_active else f"⛳ Regulation: {len(reg_completed_holes)}/18 Holes Synced"
+        st.markdown(f'<div class="metric-card" style="border-left-color: #3b82f6;
+
+# ----------------------------------------------------
+    # 9. SCOREBOARD MATRIX GRID
+    # ----------------------------------------------------
+    st.subheader("📊 Tournament Scoreboard Matrix")
+    matrix_rows = []
+    limit = max(18, max_submitted_hole)
+    for h in range(1, limit + 1):
+        if h > 18 and h > max_submitted_hole:
+            continue
+            
+        s1 = st.session_state.scores[p1].get(str(h), None)
+        s2 = st.session_state.scores[p2].get(str(h), None)
         
-        with col1:
-            diff = reg_totals[p1] - reg_totals[p2]
-            if diff < 0:
-                leader_str = f"⚡ **{p1}** leads by **{abs(diff)}** strokes (on holes both have finished)"
-            elif diff > 0:
-                leader_str = f"⚡ **{p2}** leads by **{abs(diff)}** strokes (on holes both have finished)"
-            else:
-                leader_str = "⚖️ **All Square!** Level pegs on verified territory."
-                
-            card_style = "metric-card playoff-card" if playoff_active else "metric-card"
-            st.markdown(f'<div class="{card_style}"><h4 style="margin:0; color:white;">Aggregate Score Leader</h4><p style="margin:5px 0 0 0; color:#cbd5e1; font-size:16px;">{leader_str}</p></div>', unsafe_allow_html=True)
-
-        with col2:
-            status_text = "🚨 PLAYOFFS ACTIVE (Sudden Death)" if playoff_active else f"⛳ Regulation: {len(reg_completed_holes)}/18 Holes Verified"
-            st.markdown(f'<div class="metric-card" style="border-left-color: #3b82f6;"><h4 style="margin:0; color:white;">Tournament Progression</h4><p style="margin:5px 0 0 0; color:#cbd5e1; font-size:16px;">{status_text}</p></div>', unsafe_allow_html=True)
-
-        # ----------------------------------------------------
-        # 9. DETAILED SCOREBOARD MATRIX
-        # ----------------------------------------------------
-        st.subheader("📊 Tournament Scoreboard Matrix")
+        row_label = f"Hole {h}"
+        if h > 18:
+            row_label += " 🚨 [Playoff]"
+            
+        matrix_rows.append({
+            "Hole": row_label,
+            p1: f"{s1:+}" if s1 is not None else "⏳ Waiting",
+            p2: f"{s2:+}" if s2 is not None else "⏳ Waiting",
+            "Status": "✅ Verified" if (s1 is not None and s2 is not None) else "📢 Unbalanced"
+        })
         
-        matrix_rows = []
-        limit = max(18, max_submitted_hole)
-        for h in range(1, limit + 1):
-            if h > 18 and h > max_submitted_hole:
-                continue
-                
-            s1 = st.session_state.scores[p1].get(h, None)
-            s2 = st.session_state.scores[p2].get(h, None)
-            
-            row_label = f"Hole {h}"
-            if h > 18:
-                row_label += " 🚨 [Playoff]"
-                
-            matrix_rows.append({
-                "Hole": row_label,
-                p1: f"{s1:+}" if s1 is not None else "⏳ Waiting",
-                p2: f"{s2:+}" if s2 is not None else "⏳ Waiting",
-                "Status": "✅ Verified" if (s1 is not None and s2 is not None) else "📢 Unbalanced (Awaiting Opponent)"
-            })
-            
-        st.dataframe(pd.DataFrame(matrix_rows), use_container_width=True, hide_index=True)
+    st.dataframe(pd.DataFrame(matrix_rows), use_container_width=True, hide_index=True)
 
-        # Clear Option
-        if st.button("🔄 Archive and Start New Round"):
+    # Archive Option
+    if round_ended:
+        if st.button("📦 Archive Current Round Results & Clear Table"):
+            current_db = load_db()
+            
+            # Package structural history entry
+            history_entry = {
+                "date_archived": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M"),
+                "winner": winner_name,
+                "summary": summary_msg
+            }
+            current_db["history"].append(history_entry)
+            current_db["current_round"] = {}  # Flush card clean
+            
+            save_db(current_db)
             st.session_state.scores = {}
+            st.session_state.history = current_db["history"]
             st.rerun()
-else:
-    st.info("⛳ The leaderboard is currently vacant. Paste your standard Wordle snippets on the sidebar to tee off!")
 
+# ----------------------------------------------------
+# 10. HISTORICAL CHAMPIONS ARCHIVE VIEW
+# ----------------------------------------------------
+st.write("---")
+st.header("📜 Historical Tournament Records")
+if st.session_state.history:
+    df_hist = pd.DataFrame(st.session_state.history)
+    df_hist.columns = ["Timestamp Logged", "Champion 👑", "Match Summary Breakdown"]
+    st.dataframe(df_hist, use_container_width=True, hide_index=True)
+else:
+    st.caption("No historical games archived yet. Complete an 18-hole segment to register the record book.")
