@@ -56,31 +56,38 @@ SCORE_NAMES = {-3: "🚀 ALBATROSS!", -2: "🦅 EAGLE!!", -1: "🐦 BIRDIE!", 0:
 # ----------------------------------------------------
 def get_round_start_and_hole(wordle_num):
     """
-    Finds the anchor Wordle number where the first 3 digits are even,
-    and returns the starting game number and the current hole (1-18).
+    Calculates the exact hole number based on your math rule:
+    Wordle game number minus the baseline starting anchor.
     
-    Example: Wordle 1843 -> Prefix is 184 (Even). Anchor is 1840. Hole is 4.
-    Example: Wordle 1842 -> Prefix is 184 (Even). Anchor is 1840. Hole is 3.
+    Examples for the 1841 - 1858 block (Base Anchor: 1840):
+    - Wordle 1841: 1841 - 1840 = Hole 1
+    - Wordle 1842: 1842 - 1840 = Hole 2
+    - Wordle 1843: 1843 - 1840 = Hole 3
     """
-    # Look backwards to find the base game number where this 3-digit block launched
-    for test_num in range(wordle_num, wordle_num - 30, -1):
-        # Extract the true first 3 digits of the number string
-        num_str = str(test_num).replace(",", "").replace(" ", "")
-        if len(num_str) >= 3:
-            prefix = int(num_str[:3])
-            # A round anchor triggers when the prefix becomes even
-            if prefix % 2 == 0:
-                # Find the true starting base game for this specific 3-digit even era
-                # It always rolls back to the 0-ending game of that block
-                base_prefix_string = num_str[:3]
-                start_num = int(base_prefix_string + "0")
-                
-                # Check if this calculation sits inside a valid 18-hole block windows
-                # If a user plays past hole 18, it scales naturally into playoff territory
-                hole_num = (wordle_num - start_num) + 1
-                return start_num, hole_num
-                
-    return wordle_num, 1
+    # 1. Isolate the base century prefix (e.g., 1800 from 1842)
+    century_base = (wordle_num // 100) * 100
+    
+    # 2. Extract the active trailing two digits (e.g., 42 from 1842)
+    last_two_digits = wordle_num % 100
+    
+    # 3. Step backward from the current trailing digits to find the nearest even 10s baseline
+    # (e.g., 42 goes back to 40, 55 goes back to 40, etc.)
+    for test_tens in range(last_two_digits, last_two_digits - 20, -1):
+        if test_tens >= 0 and test_tens % 20 == 0:
+            start_num = century_base + test_tens
+            break
+    else:
+        # Fallback tracking if calculation falls on boundary seams
+        start_num = wordle_num - (wordle_num % 20)
+        
+    # Your formula: (Wordle Number - Baseline Anchor) = Hole Number
+    hole_num = wordle_num - start_num
+    
+    # Safety fallback to prevent a 0-index row error
+    if hole_num == 0:
+        hole_num = 1
+        
+    return start_num, hole_num
 
 def parse_wordle_text(text):
     """
