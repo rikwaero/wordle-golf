@@ -107,22 +107,18 @@ if "player_profiles" not in st.session_state:
 # ----------------------------------------------------
 st.sidebar.header("👤 Player Profiles Manager")
 
-# Dropdown showing current dynamic players
+# Ensure default profiles match dynamic state
 player_identity = st.sidebar.selectbox(
-    "Who is uploading this score?",
+    "Who is uploading an individual score?",
     st.session_state.player_profiles,
-    help="Select your designated profile name to ensure proper tracking alignment."
+    help="Select your name before individual posting."
 )
 
-# Expandable tray to add or rename players on the fly
 with st.sidebar.expander("🛠️ Add, Edit, or Rename Players"):
-    # Sub-feature 1: Add a new player
     new_player_name = st.text_input("Add New Player Name", placeholder="e.g., Rory").strip()
     if st.button("➕ Add Player"):
         if new_player_name and new_player_name not in st.session_state.player_profiles:
             st.session_state.player_profiles.append(new_player_name)
-            
-            # Save instantly to the json file
             current_db = load_db()
             current_db["player_profiles"] = st.session_state.player_profiles
             save_db(current_db)
@@ -130,20 +126,14 @@ with st.sidebar.expander("🛠️ Add, Edit, or Rename Players"):
             
     st.write("---")
     
-    # Sub-feature 2: Rename an existing player
     player_to_rename = st.selectbox("Select Player to Rename", st.session_state.player_profiles)
     target_new_name = st.text_input("New Name for Selected Player", placeholder="e.g., Jack").strip()
     if st.button("✏️ Save New Name"):
         if target_new_name and target_new_name not in st.session_state.player_profiles:
-            # 1. Update the profile roster list
             idx = st.session_state.player_profiles.index(player_to_rename)
             st.session_state.player_profiles[idx] = target_new_name
-            
-            # 2. Transfer their active tournament scores to the new name key
             if player_to_rename in st.session_state.scores:
                 st.session_state.scores[target_new_name] = st.session_state.scores.pop(player_to_rename)
-                
-            # 3. Save everything to disk
             current_db = load_db()
             current_db["player_profiles"] = st.session_state.player_profiles
             current_db["current_round"] = st.session_state.scores
@@ -151,8 +141,8 @@ with st.sidebar.expander("🛠️ Add, Edit, or Rename Players"):
             st.rerun()
 
 st.sidebar.write("---")
-st.sidebar.header("🎯 Post Scorecard")
-wordle_paste = st.sidebar.text_area("Paste Wordle Share Text", placeholder="Wordle 1,843 3/6...", height=120)
+st.sidebar.header("🎯 Individual Entry")
+wordle_paste = st.sidebar.text_area("Paste Single Wordle Snippet", placeholder="Wordle 1,843 3/6...", height=90)
 
 if st.sidebar.button("🚀 Post Score to Database"):
     if not wordle_paste:
@@ -161,23 +151,70 @@ if st.sidebar.button("🚀 Post Score to Database"):
         w_num, strokes = parse_wordle_text(wordle_paste)
         if w_num is not None:
             _, hole = get_round_start_and_hole(w_num)
-            
             if player_identity not in st.session_state.scores:
                 st.session_state.scores[player_identity] = {}
-            
             st.session_state.scores[player_identity][str(hole)] = strokes
-            
             current_db = load_db()
             current_db["current_round"] = st.session_state.scores
             save_db(current_db)
-            
             shoutout = SCORE_NAMES.get(strokes, "🎯 SCORE")
             st.toast(f"📢 {player_identity} secured a {shoutout} on Hole {hole}!", icon="⛳")
             st.sidebar.success(f"Logged Hole {hole} (Wordle {w_num})")
             st.rerun()
         else:
-            st.sidebar.error("Could not parse Wordle text structure. Check your clipboard syntax!")
+            st.sidebar.error("Could not parse single text. Check alignment.")
 
+# ----------------------------------------------------
+# NEW EXTRA FEATURE: MESSENGER BULK THREAD PARSER
+# ----------------------------------------------------
+st.sidebar.write("---")
+st.sidebar.header("📂 Bulk Historical Messenger Input")
+with st.sidebar.expander("📬 Dump Chat Thread Data Here"):
+    st.write("Select which player sent the text below, paste the giant thread block, and the app will parse every Wordle score hidden in it.")
+    
+    bulk_player = st.selectbox("Sender of this Chat Dump", st.session_state.player_profiles, key="bulk_p_sel")
+    bulk_text = st.text_area("Paste Chat Text Content", placeholder="Dan\nWordle 1,816 3/6*...\nArchive June 3...", height=250)
+    
+    if st.button("⚡ Parse & Save All Historical Text"):
+        if not bulk_text:
+            st.error("Paste text before compiling!")
+        else:
+            # Multi-line match engine looking for 'Wordle' followed by tracking codes
+            # Handles varying spaces and commas implicitly (e.g. 'Wordle 1 810' or 'Wordle 1,816')
+            clean_bulk = bulk_text.replace(",", "")
+            matches = re.findall(r"Wordle\s*(\d+[\s\d]*)\s*([1-6Xx])/6", clean_bulk)
+            
+            if not matches:
+                st.error("No valid Wordle blocks found inside that chunk of text.")
+            else:
+                success_count = 0
+                if bulk_player not in st.session_state.scores:
+                    st.session_state.scores[bulk_player] = {}
+                    
+                for m in matches:
+                    try:
+                        # Clean inner spaces inside game index numbers
+                        raw_w_num = m[0].replace(" ", "").strip()
+                        w_num = int(raw_w_num)
+                        score_char = m[1]
+                        strokes = SCORE_MAP.get(score_char, 0)
+                        
+                        # Apply your core anchoring logic to find the 1-18 relative track index
+                        _, hole = get_round_start_and_hole(w_num)
+                        
+                        st.session_state.scores[bulk_player][str(hole)] = strokes
+                        success_count += 1
+                    except Exception:
+                        continue
+                
+                if success_count > 0:
+                    current_db = load_db()
+                    current_db["current_round"] = st.session_state.scores
+                    save_db(current_db)
+                    st.success(f"Successfully processed and stored {success_count} scores for {bulk_player}!")
+                    st.rerun()
+                else:
+                    st.error("Found patterns but structural execution failed during numerical mapping.")
 # ----------------------------------------------------
 # 5. DATA COMPUTATION & DYNAMICS
 # ----------------------------------------------------
