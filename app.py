@@ -605,7 +605,10 @@ else:
                 
             strokes = data_obj.get("strokes", 0)
             summary = data_obj.get("summary", "")
-            grid_art = data_obj.get("grid", "").replace("\n", "<br>")
+            
+            # FIXED: Explicitly strip, sanitize, and convert literal code string '\n' entries into clean HTML breaks
+            raw_grid = data_obj.get("grid", "")
+            clean_grid = raw_grid.replace("\\n", "<br>").replace("\n", "<br>").strip()
             
             # Pure CSS HTML Tooltip Architecture
             tooltip_html = f"""
@@ -613,7 +616,7 @@ else:
                 {strokes:+}
                 <span class="tooltiptext" style="
                     visibility: hidden;
-                    width: 160px;
+                    width: 170px;
                     background-color: #1e293b;
                     color: #fff;
                     text-align: center;
@@ -624,16 +627,16 @@ else:
                     z-index: 99;
                     bottom: 125%;
                     left: 50%;
-                    margin-left: -80px;
+                    margin-left: -85px;
                     opacity: 0;
                     transition: opacity 0.2s;
                     font-family: monospace;
-                    font-size: 12px;
-                    white-space: pre-line;
+                    font-size: 13px;
+                    white-space: normal;
                     line-height: 1.4;
                     box-shadow: 0 10px 15px -3px rgba(0,0,0,0.5);
                 ">
-                    <b>Grid Details:</b><br>{summary}<br><br>{grid_art}
+                    <b>Grid Details:</b><br>{summary}<br><br>{clean_grid}
                 </span>
             </div>
             """
