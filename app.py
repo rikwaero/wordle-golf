@@ -140,7 +140,7 @@ if "history" not in st.session_state:
 if "player_profiles" not in st.session_state:
     st.session_state.player_profiles = db_data.get("player_profiles", ["Dan", "Rik"])
 if "player_passwords" not in st.session_state:
-    st.session_state.player_passwords = db_data.get("player_passwords", {"Dan": "greenjacket1", "Rik": "greenjacket2"})
+    st.session_state.player_passwords = db_data.get("player_passwords", {"Dan": "YouareDan", "Rik": "YouareRik"})
 
 # Persistent device-cookie registry to bypass login prompts on known browsers
 if "device_sessions" not in st.session_state:
