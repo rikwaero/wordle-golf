@@ -233,7 +233,7 @@ else:
             st.markdown(f'<div class="winner-banner">👑 TOURNAMENT CHAMPION: {winner_name.upper()}! 👑</div>', unsafe_allow_html=True)
             st.success(f"🏆 **Put on the green jacket, {winner_name}!**")
 
-    # ----------------------------------------------------
+ # ----------------------------------------------------
     # 8. MATCH OVERVIEW TOURNAMENT CARDS
     # ----------------------------------------------------
     st.header("🏆 Live Standings")
@@ -253,9 +253,9 @@ else:
 
     with col2:
         status_text = "🚨 PLAYOFFS ACTIVE" if playoff_active else f"⛳ Regulation: {len(reg_completed_holes)}/18 Holes Synced"
-        st.markdown(f'<div class="metric-card" style="border-left-color: #3b82f6;
+        st.markdown(f'<div class="metric-card" style="border-left-color: #3b82f6;"><h4 style="margin:0; color:white;">Status Phase</h4><p style="margin:5px 0 0 0; color:#cbd5e1; font-size:16px;">{status_text}</p></div>', unsafe_allow_html=True)
 
-# ----------------------------------------------------
+    # ----------------------------------------------------
     # 9. SCOREBOARD MATRIX GRID
     # ----------------------------------------------------
     st.subheader("📊 Tournament Scoreboard Matrix")
