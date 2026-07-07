@@ -42,6 +42,27 @@ st.markdown("""
         color: #e2e8f0;
         line-height: 1.6;
     }
+        .tooltip .tooltiptext {
+        visibility: hidden;
+        width: 160px;
+        background-color: #1e293b;
+        color: #fff;
+        text-align: center;
+        border: 1px solid #475569;
+        border-radius: 6px;
+        padding: 8px;
+        position: absolute;
+        z-index: 99;
+        bottom: 125%;
+        left: 50%;
+        margin-left: -80px;
+        opacity: 0;
+        transition: opacity 0.2s;
+    }
+    .tooltip:hover .tooltiptext {
+        visibility: visible;
+        opacity: 1;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -93,19 +114,41 @@ def get_round_start_and_hole(wordle_num):
 def parse_wordle_text(text):
     """
     Parses individual free-form Wordle share snippets.
-    Ignores leading chat notes, custom dates, or 'Archive' labels seamlessly.
+    Tallies color squares and creates a clean text visualization for tooltips.
     """
-    # Clean commas and internal spacing layout traps inside game counters
     clean_text = text.replace(",", "").replace(" ", "")
     
-    # Relaxed search captures 'Wordle' anywhere inside the block, absorbing asterisks (*)
+    # Identify the game index number and core raw score character
     match = re.search(r"Wordle\s*(\d+)[^\d]*([1-6Xx])[/*]6", clean_text)
-    if match:
-        w_num = int(match.group(1))
-        score_char = match.group(2)
-        return w_num, SCORE_MAP.get(score_char, 0)
+    if not match:
+        return None, None
         
-    return None, None
+    w_num = int(match.group(1))
+    score_char = match.group(2)
+    strokes = SCORE_MAP.get(score_char, 0)
+    
+    # Color metrics extraction logic
+    greens = text.count("🟩")
+    yellows = text.count("🟨")
+    
+    # Account for both dark mode (⬛) and light mode (⬜) missed squares
+    misses = text.count("⬛") + text.count("⬜")
+    
+    # Reconstruct the grid layout lines into a compact summary string
+    grid_lines = []
+    for line in text.split("\n"):
+        if any(emoji in line for emoji in ["🟩", "🟨", "⬛", "⬜"]):
+            grid_lines.append(line.strip())
+    grid_visual = "\n".join(grid_lines)
+    
+    # Store all summary items into a data dictionary object
+    pattern_data = {
+        "strokes": strokes,
+        "summary": f"🟩 {greens} | 🟨 {yellows} | 🟥 {misses}",
+        "grid": grid_visual
+    }
+    
+    return w_num, pattern_data
 
 # ----------------------------------------------------
 # 3. STATE MANAGEMENT (LOCAL FILE DATABASE SYSTEM)
@@ -277,7 +320,7 @@ else:
         if not wordle_paste:
             st.sidebar.error("Please paste your Wordle snippet first!")
         else:
-            w_num, strokes = parse_wordle_text(wordle_paste)
+            w_num, pattern_data = parse_wordle_text(wordle_paste)
             if w_num is not None:
                 _, hole = get_round_start_and_hole(w_num)
                 hole_str = str(hole)
@@ -287,21 +330,24 @@ else:
                     st.session_state.scores[my_name] = {}
                 
                 is_update = hole_str in st.session_state.scores[my_name]
-                st.session_state.scores[my_name][hole_str] = strokes
+                
+                # CRITICAL CHANGE: Saves the structured data map instead of a flat integer
+                st.session_state.scores[my_name][hole_str] = pattern_data
                 
                 current_db = load_db()
                 current_db["current_round"] = st.session_state.scores
                 save_db(current_db)
                 
+                strokes = pattern_data["strokes"]
                 shoutout = SCORE_NAMES.get(strokes, f"{strokes} strokes")
                 if is_update:
-                    st.session_state.post_msg = f"🔄 OVERWRITE SUCCESSFUL! Updated Hole {hole} for you to {shoutout}."
+                    st.session_state.post_msg = f"🔄 OVERWRITE SUCCESSFUL! Updated Hole {hole} for you."
                 else:
                     st.session_state.post_msg = f"✅ READ SUCCESSFUL! Logged Hole {hole} to your card: {shoutout}."
                 st.rerun()
             else:
                 st.sidebar.error("Regex Parsing Mismatch. Check text layout structures.")
-
+                
     # ----------------------------------------------------
     # 4b. BULK THREAD PARSER (RESTRICTED TO CURRENT USER)
     # ----------------------------------------------------
@@ -380,10 +426,13 @@ else:
         reg_totals[p2] = 0
     
     for h in range(1, 19):
-        s1 = st.session_state.scores[p1].get(str(h))
-        s2 = st.session_state.scores[p2].get(str(h)) if p2 else None
+        res1 = st.session_state.scores[p1].get(str(h))
+        res2 = st.session_state.scores[p2].get(str(h)) if p2 else None
         
-        # Only accumulate scores if BOTH players have logged a value for this hole
+        # Pull out strokes safely considering backward-compatible structures
+        s1 = res1.get("strokes") if isinstance(res1, dict) else res1
+        s2 = res2.get("strokes") if isinstance(res2, dict) else res2
+        
         if s1 is not None and s2 is not None and p2:
             reg_completed_holes.append(h)
             reg_totals[p1] += s1
@@ -530,33 +579,110 @@ else:
         st.markdown(f'<div class="metric-card" style="border-left-color: #3b82f6;"><h4 style="margin:0; color:white;">Status Phase</h4><p style="margin:5px 0 0 0; color:#cbd5e1; font-size:16px;">{status_text}</p></div>', unsafe_allow_html=True)
     
     # ----------------------------------------------------
-    # 9. SCOREBOARD MATRIX GRID
+    # 9. SCOREBOARD MATRIX GRID WITH HTML TOOLTIPS
     # ----------------------------------------------------
     st.subheader("📊 Tournament Scoreboard Matrix")
+    st.caption("💡 Hover your mouse or press on a score entry to preview its color grids and block patterns!")
+    
     matrix_rows = []
     limit = max(18, max_submitted_hole)
+    
     for h in range(1, limit + 1):
         if h > 18 and h > max_submitted_hole:
             continue
             
-        s1 = st.session_state.scores[p1].get(str(h), None)
-        # Safely get player 2's score only if player 2 exists
-        s2 = st.session_state.scores[p2].get(str(h), None) if p2 else None
+        res1 = st.session_state.scores[p1].get(str(h), None)
+        res2 = st.session_state.scores[p2].get(str(h), None) if p2 else None
+        
+        # Helper extraction functions to compile visual components safely
+        def generate_cell_html(data_obj):
+            if data_obj is None:
+                return "<span style='color: #64748b;'>⏳ Waiting</span>"
+                
+            # Safely support legacy numerical records if present in old files
+            if not isinstance(data_obj, dict):
+                return f"<b>{data_obj:+}</b>"
+                
+            strokes = data_obj.get("strokes", 0)
+            summary = data_obj.get("summary", "")
+            grid_art = data_obj.get("grid", "").replace("\n", "<br>")
+            
+            # Pure CSS HTML Tooltip Architecture
+            tooltip_html = f"""
+            <div class="tooltip" style="position: relative; display: inline-block; cursor: help; font-weight: bold; color: #22c55e;">
+                {strokes:+}
+                <span class="tooltiptext" style="
+                    visibility: hidden;
+                    width: 160px;
+                    background-color: #1e293b;
+                    color: #fff;
+                    text-align: center;
+                    border: 1px solid #475569;
+                    border-radius: 6px;
+                    padding: 8px;
+                    position: absolute;
+                    z-index: 99;
+                    bottom: 125%;
+                    left: 50%;
+                    margin-left: -80px;
+                    opacity: 0;
+                    transition: opacity 0.2s;
+                    font-family: monospace;
+                    font-size: 12px;
+                    white-space: pre-line;
+                    line-height: 1.4;
+                    box-shadow: 0 10px 15px -3px rgba(0,0,0,0.5);
+                ">
+                    <b>Grid Details:</b><br>{summary}<br><br>{grid_art}
+                </span>
+            </div>
+            """
+            return tooltip_html
+
+        p1_display = generate_cell_html(res1)
+        p2_display = generate_cell_html(res2)
         
         row_label = f"Hole {h}"
         if h > 18:
             row_label += " 🚨 [Playoff]"
             
         p2_display_name = p2 if p2 else "Awaiting Opponent"
+        status_label = "✅ Verified" if (res1 is not None and res2 is not None) else "📢 Unbalanced"
         
         matrix_rows.append({
             "Hole": row_label,
-            p1: f"{s1:+}" if s1 is not None else "⏳ Waiting",
-            p2_display_name: f"{s2:+}" if s2 is not None else "⏳ Waiting",
-            "Status": "✅ Verified" if (s1 is not None and s2 is not None) else "📢 Unbalanced"
+            p1: p1_display,
+            p2_display_name: p2_display,
+            "Status": status_label
         })
         
-    st.dataframe(pd.DataFrame(matrix_rows), use_container_width=True, hide_index=True)
+    # Render using the custom pandas HTML generator to unlock pure interactive CSS capabilities
+    df_matrix = pd.DataFrame(matrix_rows)
+    st.write(df_matrix.to_html(escape=False, index=False), unsafe_allow_html=True)
+    
+    # Append the interactive hover activation wrapper instructions to your master style sheet frame
+    st.markdown("""
+    <style>
+        .tooltip:hover .tooltiptext {
+            visibility: visible !important;
+            opacity: 1 !important;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+        }
+        th, td {
+            padding: 12px !important;
+            text-align: left;
+            border-bottom: 1px solid #334155;
+        }
+        th {
+            background-color: #1e293b;
+            color: #f8fafc;
+        }
+    </style>
+    """, unsafe_allow_html=True)
 
 # Archive Option
     if round_ended:
