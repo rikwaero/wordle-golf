@@ -577,43 +577,39 @@ else:
     # ----------------------------------------------------
     # 9. HORIZONTAL TRADITIONAL GOLF SCORECARD MATRIX
     # ----------------------------------------------------
-    st.subheader("📊 Tournament Scorecard Matrix")
+    st.subheader("📊 Tournament Scoreboard Matrix")
     st.caption("💡 Hover your mouse or press on any cell score to preview its color grids and block patterns!")
 
-    # Establish lists of active player identities
     p1_name = p1
     p2_name = p2 if p2 else "Awaiting Opponent"
     display_players = [p1_name]
     if p2:
         display_players.append(p2_name)
 
-    # Determine maximum layout boundaries including playoff extension rooms
     p1_holes = [int(k) for k in st.session_state.scores[p1_name].keys()]
     p2_holes = [int(k) for k in st.session_state.scores[p2_name].keys()] if p2 else []
     all_holes_list = p1_holes + p2_holes
     max_hole = max(all_holes_list) if all_holes_list else 18
     limit_holes = max(18, max_hole)
 
-    # Compile the interactive HTML row data dictionary for each competitor
     scorecard_rows = {}
+    total_synced_holes = 0  # Track maximum matched holes for header label mapping
+
     for player in display_players:
-        # 1. Initialize empty cell maps
         scorecard_rows[player] = {
             "total": 0,
+            "synced_count": 0,
             "front_9": 0,
             "back_9": 0,
             "holes_html": {}
         }
         
-        # 2. Iterate hole-by-hole to collect scores and build cell hover tooltips
         for h in range(1, limit_holes + 1):
-            # Fetch data object if player profile is active
             res = st.session_state.scores.get(player, {}).get(str(h), None) if player != "Awaiting Opponent" else None
             
             if res is None:
                 cell_html = "<span style='color: #64748b;'>⏳</span>"
             else:
-                # Handle fallback if old plain integer data format exists in database
                 if not isinstance(res, dict):
                     strokes = int(res)
                     summary = "Legacy Entry"
@@ -624,30 +620,30 @@ else:
                     raw_grid = str(res.get("grid", ""))
                     clean_grid = raw_grid.replace("\\n", "<br>").replace("\n", "<br>").replace(r"\n", "<br>").strip()
 
-                # ONLY accumulate into scorecard totals if BOTH players have logged data for this specific hole
+                # Accumulate values strictly if BOTH players have logged data
                 if p2 and str(h) in st.session_state.scores[p1_name] and str(h) in st.session_state.scores[p2_name]:
                     scorecard_rows[player]["total"] += strokes
+                    scorecard_rows[player]["synced_count"] += 1
                     if 1 <= h <= 9:
                         scorecard_rows[player]["front_9"] += strokes
                     elif 10 <= h <= 18:
                         scorecard_rows[player]["back_9"] += strokes
 
-                # Generate clean interactive CSS tooltips for horizontal cells
                 cell_html = f'<div class="wordle-tooltip">{strokes:+}<span class="wordle-tooltiptext"><b>Hole {h} Grid:</b><br>{summary}<br><br>{clean_grid}</span></div>'
             
             scorecard_rows[player]["holes_html"][h] = cell_html
 
-    # ----------------------------------------------------
-    # ASSEMBLE STRUCTURAL HTML TABLE LAYOUT
-    # ----------------------------------------------------
-    # Build header row columns string dynamically
+    # Capture the active synced count to insert into table header
+    if p2 and p1_name in scorecard_rows:
+        total_synced_holes = scorecard_rows[p1_name]["synced_count"]
+
+    # Assemble HTML Table
     html_table = "<table><thead><tr>"
     html_table += "<th>Competitor</th>"
-    html_table += "<th style='background-color: #d97706; color: white;'>Total</th>"
+    html_table += f"<th style='background-color: #d97706; color: white;'>Total ({total_synced_holes})</th>"
     html_table += "<th style='background-color: #1e293b;'>F (1-9)</th>"
     html_table += "<th style='background-color: #1e293b;'>B (10-18)</th>"
     
-    # Generate columns for regulation holes + any active playoff frames
     for h in range(1, limit_holes + 1):
         lbl = str(h)
         if h > 18:
@@ -655,14 +651,18 @@ else:
         html_table += f"<th>{lbl}</th>"
     html_table += "</tr></thead><tbody>"
 
-    # Generate data rows for the active players
     for player in display_players:
-        tot_str = f"{scorecard_rows[player]['total']:+}" if scorecard_rows[player]['total'] != 0 else "E"
-        f9_str = f"{scorecard_rows[player]['front_9']:+}" if scorecard_rows[player]['front_9'] != 0 else "E"
-        b9_str = f"{scorecard_rows[player]['back_9']:+}" if scorecard_rows[player]['back_9'] != 0 else "E"
-        
         if player == "Awaiting Opponent":
             tot_str, f9_str, b9_str = "⏳", "⏳", "⏳"
+        else:
+            tot_val = scorecard_rows[player]['total']
+            tot_str = f"{tot_val:+}" if tot_val != 0 else "E"
+            
+            f9_val = scorecard_rows[player]['front_9']
+            f9_str = f"{f9_val:+}" if f9_val != 0 else "E"
+            
+            b9_val = scorecard_rows[player]['back_9']
+            b9_str = f"{b9_val:+}" if b9_val != 0 else "E"
 
         html_table += "<tr>"
         html_table += f"<td><b>{player}</b></td>"
@@ -676,11 +676,10 @@ else:
 
     html_table += "</tbody></table>"
 
-    # Scrub newlines out to completely block Markdown text translation bugs
     clean_html_table = html_table.replace("\n", "").strip()
     st.markdown(clean_html_table, unsafe_allow_html=True)
 
-    # Master Horizontal Scorecard Style Sheet
+    # Scorecard Layout Stylesheet Settings
     st.markdown("""
     <style>
         .wordle-tooltip {
@@ -753,7 +752,6 @@ else:
     </style>
     """, unsafe_allow_html=True)
 
-    # Archive Option Layout Link
     if round_ended:
         if st.button("📦 Archive Current Round Results & Clear Table"):
             current_db = load_db()
@@ -771,7 +769,6 @@ else:
             st.session_state.scores = {}
             st.session_state.history = current_db["history"]
             st.rerun()
-
 
 
 # ----------------------------------------------------
