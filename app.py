@@ -92,23 +92,63 @@ def save_db(data):
         json.dump(data, f, indent=4)
 
 # Initialize Session State from DB
+# Initialize Session State from DB
 db_data = load_db()
 if "scores" not in st.session_state:
     st.session_state.scores = db_data.get("current_round", {})
 if "history" not in st.session_state:
     st.session_state.history = db_data.get("history", [])
+if "player_profiles" not in st.session_state:
+    # Default names to start with if nothing is in the database yet
+    st.session_state.player_profiles = db_data.get("player_profiles", ["Dan", "Rik"])
 
 # ----------------------------------------------------
 # 4. SIDEBAR IDENTITY & USER INPUT
 # ----------------------------------------------------
-st.sidebar.header("👤 Player Authentication")
+st.sidebar.header("👤 Player Profiles Manager")
 
-# Dropdown to ensure the app cleanly segregates the two players
+# Dropdown showing current dynamic players
 player_identity = st.sidebar.selectbox(
     "Who is uploading this score?",
-    ["Player 1", "Player 2"],
+    st.session_state.player_profiles,
     help="Select your designated profile name to ensure proper tracking alignment."
 )
+
+# Expandable tray to add or rename players on the fly
+with st.sidebar.expander("🛠️ Add, Edit, or Rename Players"):
+    # Sub-feature 1: Add a new player
+    new_player_name = st.text_input("Add New Player Name", placeholder="e.g., Rory").strip()
+    if st.button("➕ Add Player"):
+        if new_player_name and new_player_name not in st.session_state.player_profiles:
+            st.session_state.player_profiles.append(new_player_name)
+            
+            # Save instantly to the json file
+            current_db = load_db()
+            current_db["player_profiles"] = st.session_state.player_profiles
+            save_db(current_db)
+            st.rerun()
+            
+    st.write("---")
+    
+    # Sub-feature 2: Rename an existing player
+    player_to_rename = st.selectbox("Select Player to Rename", st.session_state.player_profiles)
+    target_new_name = st.text_input("New Name for Selected Player", placeholder="e.g., Jack").strip()
+    if st.button("✏️ Save New Name"):
+        if target_new_name and target_new_name not in st.session_state.player_profiles:
+            # 1. Update the profile roster list
+            idx = st.session_state.player_profiles.index(player_to_rename)
+            st.session_state.player_profiles[idx] = target_new_name
+            
+            # 2. Transfer their active tournament scores to the new name key
+            if player_to_rename in st.session_state.scores:
+                st.session_state.scores[target_new_name] = st.session_state.scores.pop(player_to_rename)
+                
+            # 3. Save everything to disk
+            current_db = load_db()
+            current_db["player_profiles"] = st.session_state.player_profiles
+            current_db["current_round"] = st.session_state.scores
+            save_db(current_db)
+            st.rerun()
 
 st.sidebar.write("---")
 st.sidebar.header("🎯 Post Scorecard")
@@ -122,14 +162,11 @@ if st.sidebar.button("🚀 Post Score to Database"):
         if w_num is not None:
             _, hole = get_round_start_and_hole(w_num)
             
-            # Update local RAM session state
             if player_identity not in st.session_state.scores:
                 st.session_state.scores[player_identity] = {}
             
-            # JSON keys must be strings, converting hole to string for reliability
             st.session_state.scores[player_identity][str(hole)] = strokes
             
-            # Commit instantly to file storage database
             current_db = load_db()
             current_db["current_round"] = st.session_state.scores
             save_db(current_db)
@@ -285,19 +322,19 @@ else:
         
     st.dataframe(pd.DataFrame(matrix_rows), use_container_width=True, hide_index=True)
 
-    # Archive Option
+# Archive Option
     if round_ended:
         if st.button("📦 Archive Current Round Results & Clear Table"):
             current_db = load_db()
             
-            # Package structural history entry
             history_entry = {
                 "date_archived": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M"),
                 "winner": winner_name,
                 "summary": summary_msg
             }
             current_db["history"].append(history_entry)
-            current_db["current_round"] = {}  # Flush card clean
+            current_db["current_round"] = {}  # Clears active scores
+            current_db["player_profiles"] = st.session_state.player_profiles  # Keeps player profiles!
             
             save_db(current_db)
             st.session_state.scores = {}
