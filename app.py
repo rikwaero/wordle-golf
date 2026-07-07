@@ -185,14 +185,15 @@ with st.sidebar.expander("📬 Dump Chat Thread Data Here"):
     bulk_player = st.selectbox("Sender of this Chat Dump", st.session_state.player_profiles, key="bulk_p_sel")
     bulk_text = st.text_area("Paste Chat Text Content", placeholder="Dan\nWordle 1,816 3/6*...\nArchive June 3...", height=250)
     
-    if st.button("⚡ Parse & Save All Historical Text"):
+     if st.button("⚡ Parse & Save All Historical Text"):
         if not bulk_text:
             st.error("Paste text before compiling!")
         else:
-            # Multi-line match engine looking for 'Wordle' followed by tracking codes
-            # Handles varying spaces and commas implicitly (e.g. 'Wordle 1 810' or 'Wordle 1,816')
+            # Clean up raw numeric string inputs to normalize missing delimiters
             clean_bulk = bulk_text.replace(",", "")
-            matches = re.findall(r"Wordle\s*(\d+[\s\d]*)\s*([1-6Xx])/6", clean_bulk)
+            
+            # UPDATED FIXED REGEX PATTERN: Safely parses hard-mode records (Y/6*) within text walls
+            matches = re.findall(r"Wordle\s*(\d+[\s\d]*)\s*([1-6Xx])[/*]6", clean_bulk)
             
             if not matches:
                 st.error("No valid Wordle blocks found inside that chunk of text.")
@@ -203,13 +204,13 @@ with st.sidebar.expander("📬 Dump Chat Thread Data Here"):
                     
                 for m in matches:
                     try:
-                        # Clean inner spaces inside game index numbers
+                        # Normalize interior formatting gaps (e.g., '1 810' to '1810')
                         raw_w_num = m[0].replace(" ", "").strip()
                         w_num = int(raw_w_num)
                         score_char = m[1]
                         strokes = SCORE_MAP.get(score_char, 0)
                         
-                        # Apply your core anchoring logic to find the 1-18 relative track index
+                        # Match relative index using your even anchor engine rules
                         _, hole = get_round_start_and_hole(w_num)
                         
                         st.session_state.scores[bulk_player][str(hole)] = strokes
