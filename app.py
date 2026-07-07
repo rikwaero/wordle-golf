@@ -112,176 +112,220 @@ def parse_wordle_text(text):
 # ----------------------------------------------------
 
 DB_FILE = "golf_history.json"
-def load_db():
-    """Loads all current round and historical data from the JSON file."""
-    if os.path.exists(DB_FILE):
-        try:
-            with open(DB_FILE, "r") as f:
-                return json.load(f)
-        except Exception:
-            pass
-    # Default schema if file doesn't exist
-    return {"current_round": {}, "history": []}
 
-def save_db(data):
-    """Saves the tracking data structurally back to disk."""
-    with open(DB_FILE, "w") as f:
-        json.dump(data, f, indent=4)
-
-# Initialize Session State from DB
-# Initialize Session State from DB
 db_data = load_db()
 if "scores" not in st.session_state:
     st.session_state.scores = db_data.get("current_round", {})
 if "history" not in st.session_state:
     st.session_state.history = db_data.get("history", [])
 if "player_profiles" not in st.session_state:
-    # Default names to start with if nothing is in the database yet
     st.session_state.player_profiles = db_data.get("player_profiles", ["Dan", "Rik"])
+if "player_passwords" not in st.session_state:
+    st.session_state.player_passwords = db_data.get("player_passwords", {"Dan": "YouareDan", "Rik": "YouareRik"})
 
-# ----------------------------------------------------
-# 4. SIDEBAR IDENTITY & USER INPUT
-# ----------------------------------------------------
-st.sidebar.header("👤 Player Profiles Manager")
+# Persistent device-cookie registry to bypass login prompts on known browsers
+if "device_sessions" not in st.session_state:
+    st.session_state.device_sessions = db_data.get("device_sessions", {})
 
-# Safe identity assignment dropdown
-player_identity = st.sidebar.selectbox(
-    "Who is uploading an individual score?",
-    st.session_state.player_profiles,
-    help="Select your name before individual posting."
-)
-
-with st.sidebar.expander("🛠️ Add, Edit, or Rename Players"):
-    new_player_name = st.text_input("Add New Player Name", placeholder="e.g., Rory").strip()
-    if st.button("➕ Add Player"):
-        if new_player_name and new_player_name not in st.session_state.player_profiles:
-            st.session_state.player_profiles.append(new_player_name)
-            current_db = load_db()
-            current_db["player_profiles"] = st.session_state.player_profiles
-            save_db(current_db)
-            st.session_state.post_msg = f"✅ Added player profile: {new_player_name}"
-            st.rerun()
-            
-    st.write("---")
+# Auto-Login Logic: Check if this specific browser session context matches a saved user profile
+if "current_user" not in st.session_state:
+    st.session_state.current_user = None
     
-    player_to_rename = st.selectbox("Select Player to Rename", st.session_state.player_profiles)
-    target_new_name = st.text_input("New Name for Selected Player", placeholder="e.g., Jack").strip()
-    if st.button("✏️ Save New Name"):
-        if target_new_name and target_new_name not in st.session_state.player_profiles:
-            idx = st.session_state.player_profiles.index(player_to_rename)
-            st.session_state.player_profiles[idx] = target_new_name
-            if player_to_rename in st.session_state.scores:
-                st.session_state.scores[target_new_name] = st.session_state.scores.pop(player_to_rename)
-            current_db = load_db()
-            current_db["player_profiles"] = st.session_state.player_profiles
-            current_db["current_round"] = st.session_state.scores
-            save_db(current_db)
-            st.session_state.post_msg = f"✅ Renamed {player_to_rename} to {target_new_name}"
-            st.rerun()
-
-# ----------------------------------------------------
-# EXTRA SAFETY FEATURES: RE-RACK & ERROR RESOLUTIONS
-# ----------------------------------------------------
-with st.sidebar.expander("🗑️ Troubleshooting & Deletions"):
-    st.write("Correct individual input anomalies or clear out duplicate scorecard rows below.")
-    target_del_p = st.selectbox("Target Player", st.session_state.player_profiles, key="del_p_sel")
-    target_del_hole = st.number_input("Target Hole # to Wipe", min_value=1, max_value=50, value=1, step=1)
+try:
+    from streamlit.web.server.websocket_headers import _get_websocket_headers
+    headers = _get_websocket_headers()
+    browser_token = f"{headers.get('User-Agent', '')}_{headers.get('X-Forwarded-For', 'local')}"
     
-    if st.button("❌ Wipe Single Score"):
-        h_str = str(target_del_hole)
-        if target_del_p in st.session_state.scores and h_str in st.session_state.scores[target_del_p]:
-            st.session_state.scores[target_del_p].pop(h_str)
-            current_db = load_db()
-            current_db["current_round"] = st.session_state.scores
-            save_db(current_db)
-            st.session_state.post_msg = f"🗑️ Successfully wiped Hole {target_del_hole} for {target_del_p}!"
-            st.rerun()
-        else:
-            st.sidebar.error("No record found matching those values.")
-
-st.sidebar.write("---")
-st.sidebar.header("🎯 Individual Entry")
-wordle_paste = st.sidebar.text_area("Paste Single Wordle Snippet", placeholder="Wordle 1,843 5/6*...", height=90)
-
-if st.sidebar.button("🚀 Post Score to Database"):
-    if not wordle_paste:
-        st.sidebar.error("Please paste your Wordle snippet first!")
-    else:
-        w_num, strokes = parse_wordle_text(wordle_paste)
-        if w_num is not None:
-            _, hole = get_round_start_and_hole(w_num)
-            hole_str = str(hole)
-            
-            if player_identity not in st.session_state.scores:
-                st.session_state.scores[player_identity] = {}
-            
-            is_update = hole_str in st.session_state.scores[player_identity]
-            st.session_state.scores[player_identity][hole_str] = strokes
-            
-            current_db = load_db()
-            current_db["current_round"] = st.session_state.scores
-            save_db(current_db)
-            
-            # FIXED CONFIRMATION HOOK: Stores messages inside permanent session memory before refresh
-            shoutout = SCORE_NAMES.get(strokes, f"{strokes} strokes")
-            if is_update:
-                st.session_state.post_msg = f"🔄 OVERWRITE SUCCESSFUL! Updated Hole {hole} (Wordle {w_num}) for {player_identity} to {shoutout}."
-            else:
-                st.session_state.post_msg = f"✅ READ SUCCESSFUL! Logged Hole {hole} (Wordle {w_num}) for {player_identity}: {shoutout}."
-            st.rerun()
-        else:
-            st.sidebar.error("Regex Parsing Mismatch. Ensure the text starts with 'Wordle X,XXX Y/6'.")
+    if browser_token in st.session_state.device_sessions:
+        st.session_state.current_user = st.session_state.device_sessions[browser_token]
+except Exception:
+    pass
+# ====================================================
 
 # ----------------------------------------------------
-# 4b. BULK THREAD PARSER
+# 4. SIDEBAR IDENTITY & USER INPUT (PERSISTENT LOGIN)
 # ----------------------------------------------------
-st.sidebar.write("---")
-st.sidebar.header("📂 Bulk Historical Messenger Input")
-with st.sidebar.expander("📬 Dump Chat Thread Data Here"):
-    bulk_player = st.selectbox("Sender of this Chat Dump", st.session_state.player_profiles, key="bulk_p_sel")
-    bulk_text = st.text_area("Paste Chat Text Content", placeholder="Dan\nWordle 1,816 3/6*...", height=150)
+st.sidebar.header("🔐 Pro Tour Player Login")
+
+# Generate the device token context for cookie simulation mapping
+try:
+    from streamlit.web.server.websocket_headers import _get_websocket_headers
+    headers = _get_websocket_headers()
+    browser_token = f"{headers.get('User-Agent', '')}_{headers.get('X-Forwarded-For', 'local')}"
+except Exception:
+    browser_token = "fallback_local_token"
+
+if st.session_state.current_user is None:
+    # Login Panel Form
+    login_name = st.sidebar.selectbox("Select Your Profile Name", st.session_state.player_profiles)
+    login_pwd = st.sidebar.text_input("Enter Private Password", type="password", help="Default starting passwords are 'greenjacket1' and 'greenjacket2'")
+    remember_me = st.sidebar.checkbox("Keep me logged in on this device", value=True)
     
-    if st.button("⚡ Parse & Save All Historical Text"):
-        if not bulk_text:
-            st.error("Paste text before compiling!")
-        else:
-            # Clean up comma punctuation to normalize numerical structures
-            clean_bulk = bulk_text.replace(",", "")
+    if os.environ.get("STREAMLIT_RUNTIME_ENV") == "cloud":
+        st.sidebar.caption("💡 Check 'Keep me logged in' to bypass this prompt next time you open your phone!")
+    
+    if st.sidebar.button("🚪 Enter Clubhouse"):
+        correct_pwd = st.session_state.player_passwords.get(login_name)
+        if correct_pwd and login_pwd == correct_pwd:
+            st.session_state.current_user = login_name
             
-            # Global match extracts every instance of a Wordle game, regardless of prepended text lines
-            matches = re.findall(r"Wordle\s*(\d+[\s\d]*)\s*([1-6Xx])[/*]6", clean_bulk)
-            
-            if not matches:
-                st.error("No valid Wordle blocks found inside that chunk of text.")
-            else:
-                success_count = 0
-                if bulk_player not in st.session_state.scores:
-                    st.session_state.scores[bulk_player] = {}
-                    
-                for m in matches:
-                    try:
-                        # Extract and scrub interior spacing
-                        raw_w_num = m[0].replace(" ", "").strip()
-                        w_num = int(raw_w_num)
-                        score_char = m[1]
-                        strokes = SCORE_MAP.get(score_char, 0)
-                        
-                        # Process through your custom 18-hole prefix mapping rule
-                        _, hole = get_round_start_and_hole(w_num)
-                        
-                        st.session_state.scores[bulk_player][str(hole)] = strokes
-                        success_count += 1
-                    except Exception:
-                        continue
+            # If "Remember Me" is checked, commit this browser's footprint to disk database
+            if remember_me:
+                st.session_state.device_sessions[browser_token] = login_name
+                current_db = load_db()
+                current_db["device_sessions"] = st.session_state.device_sessions
+                save_db(current_db)
                 
-                if success_count > 0:
+            st.session_state.post_msg = f"🔓 Welcome back, {login_name}! Device remembered successfully."
+            st.rerun()
+        else:
+            st.sidebar.error("Invalid passcode combination. Please try again.")
+else:
+    # User is securely and persistently logged in!
+    st.sidebar.markdown(f"⛳ Logged in as: **{st.session_state.current_user}**")
+    
+    # Forget Device / Logout Link
+    if st.sidebar.button("🔒 Log Out & Forget Device"):
+        # Remove this browser instance from the database cache registry
+        if browser_token in st.session_state.device_sessions:
+            st.session_state.device_sessions.pop(browser_token)
+            current_db = load_db()
+            current_db["device_sessions"] = st.session_state.device_sessions
+            save_db(current_db)
+            
+        st.session_state.current_user = None
+        st.rerun()
+        
+    st.sidebar.write("---")
+
+    # ----------------------------------------------------
+    # PLAYER PROFILE CREATION & ADMINISTRATIVE TOOLS
+    # ----------------------------------------------------
+    with st.sidebar.expander("🛠️ Profile Administration"):
+        st.write("Register a brand new competitor profile or rename yours below.")
+        
+        new_player_name = st.text_input("Add New Player Name", placeholder="e.g., Rory").strip()
+        new_player_pwd = st.text_input("Assign Starter Password", type="password", placeholder="e.g., pass123")
+        
+        if st.button("➕ Add Player Profile"):
+            if new_player_name and new_player_pwd:
+                if new_player_name not in st.session_state.player_profiles:
+                    st.session_state.player_profiles.append(new_player_name)
+                    st.session_state.player_passwords[new_player_name] = new_player_pwd
+                    
                     current_db = load_db()
-                    current_db["current_round"] = st.session_state.scores
+                    current_db["player_profiles"] = st.session_state.player_profiles
+                    current_db["player_passwords"] = st.session_state.player_passwords
                     save_db(current_db)
-                    st.session_state.post_msg = f"⚡ BULK IMPORT SUCCESSFUL! Processed and saved {success_count} scores for {bulk_player}."
+                    
+                    st.session_state.post_msg = f"✅ Created profile for {new_player_name}!"
                     st.rerun()
                 else:
-                    st.error("Pattern processing failed during internal structural extraction.")
+                    st.error("That profile moniker already exists.")
+            else:
+                st.error("Fill out both input boxes to launch profile metadata.")
+
+    # ----------------------------------------------------
+    # TROUBLESHOOTING & DELETIONS PANEL
+    # ----------------------------------------------------
+    with st.sidebar.expander("🗑️ Scorecard Corrections"):
+        st.write("Wipe out typing errors on your active card. You can only modify your own scores.")
+        target_del_hole = st.number_input("Target Hole # to Wipe", min_value=1, max_value=50, value=1, step=1)
+        
+        if st.button("❌ Wipe Single Score"):
+            h_str = str(target_del_hole)
+            my_name = st.session_state.current_user
+            
+            if my_name in st.session_state.scores and h_str in st.session_state.scores[my_name]:
+                st.session_state.scores[my_name].pop(h_str)
+                current_db = load_db()
+                current_db["current_round"] = st.session_state.scores
+                save_db(current_db)
+                st.session_state.post_msg = f"🗑️ Successfully wiped Hole {target_del_hole} off your card!"
+                st.rerun()
+            else:
+                st.error("No recorded entry found matching that hole layout on your card.")
+
+    # ----------------------------------------------------
+    # DATA SUBMISSION ROUTINES
+    # ----------------------------------------------------
+    st.sidebar.write("---")
+    st.sidebar.header("🎯 Individual Entry")
+    wordle_paste = st.sidebar.text_area("Paste Single Wordle Snippet", placeholder="Wordle 1,843 5/6*...", height=90)
+
+    if st.sidebar.button("🚀 Post Score to Database"):
+        if not wordle_paste:
+            st.sidebar.error("Please paste your Wordle snippet first!")
+        else:
+            w_num, strokes = parse_wordle_text(wordle_paste)
+            if w_num is not None:
+                _, hole = get_round_start_and_hole(w_num)
+                hole_str = str(hole)
+                my_name = st.session_state.current_user
+                
+                if my_name not in st.session_state.scores:
+                    st.session_state.scores[my_name] = {}
+                
+                is_update = hole_str in st.session_state.scores[my_name]
+                st.session_state.scores[my_name][hole_str] = strokes
+                
+                current_db = load_db()
+                current_db["current_round"] = st.session_state.scores
+                save_db(current_db)
+                
+                shoutout = SCORE_NAMES.get(strokes, f"{strokes} strokes")
+                if is_update:
+                    st.session_state.post_msg = f"🔄 OVERWRITE SUCCESSFUL! Updated Hole {hole} for you to {shoutout}."
+                else:
+                    st.session_state.post_msg = f"✅ READ SUCCESSFUL! Logged Hole {hole} to your card: {shoutout}."
+                st.rerun()
+            else:
+                st.sidebar.error("Regex Parsing Mismatch. Check text layout structures.")
+
+    # ----------------------------------------------------
+    # 4b. BULK THREAD PARSER (RESTRICTED TO CURRENT USER)
+    # ----------------------------------------------------
+    st.sidebar.write("---")
+    st.sidebar.header("📂 Bulk Historical Messenger Input")
+    with st.sidebar.expander("📬 Dump Chat Thread Data Here"):
+        st.write(f"This will extract Wordle text strings directly onto your scorecard profile (**{st.session_state.current_user}**).")
+        bulk_text = st.text_area("Paste Chat Text Content", placeholder="Wordle 1,816 3/6*...", height=150)
+        
+        if st.button("⚡ Parse & Save All Historical Text"):
+            if not bulk_text:
+                st.error("Paste text before compiling!")
+            else:
+                my_name = st.session_state.current_user
+                clean_bulk = bulk_text.replace(",", "")
+                matches = re.findall(r"Wordle\s*(\d+[\s\d]*)\s*([1-6Xx])[/*]6", clean_bulk)
+                
+                if not matches:
+                    st.error("No valid Wordle blocks found inside that chunk of text.")
+                else:
+                    success_count = 0
+                    if my_name not in st.session_state.scores:
+                        st.session_state.scores[my_name] = {}
+                        
+                    for m in matches:
+                        try:
+                            raw_w_num = m.replace(" ", "").strip()
+                            w_num = int(raw_w_num)
+                            score_char = m
+                            strokes = SCORE_MAP.get(score_char, 0)
+                            _, hole = get_round_start_and_hole(w_num)
+                            st.session_state.scores[my_name][str(hole)] = strokes
+                            success_count += 1
+                        except Exception:
+                            continue
+                    
+                    if success_count > 0:
+                        current_db = load_db()
+                        current_db["current_round"] = st.session_state.scores
+                        save_db(current_db)
+                        st.session_state.post_msg = f"⚡ BULK IMPORT SUCCESSFUL! Saved {success_count} scores to your profile card."
+                        st.rerun()
+                    else:
+                        st.error("Pattern processing failed during internal structural extraction.")
 
 # ----------------------------------------------------
 # 5. DATA COMPUTATION & DYNAMICS
@@ -494,20 +538,21 @@ else:
         
     st.dataframe(pd.DataFrame(matrix_rows), use_container_width=True, hide_index=True)
 
-    # Archive Option
+# Archive Option
     if round_ended:
         if st.button("📦 Archive Current Round Results & Clear Table"):
             current_db = load_db()
             
-            # Package structural history entry
             history_entry = {
                 "date_archived": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M"),
                 "winner": winner_name,
                 "summary": summary_msg
             }
             current_db["history"].append(history_entry)
-            current_db["current_round"] = {}  # Flush card clean
+            current_db["current_round"] = {}  # Clears current round grid scores
             current_db["player_profiles"] = st.session_state.player_profiles
+            current_db["player_passwords"] = st.session_state.player_passwords
+            current_db["device_sessions"] = st.session_state.device_sessions  # Saves browser session cookie registry!
             
             save_db(current_db)
             st.session_state.scores = {}
