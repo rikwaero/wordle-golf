@@ -114,11 +114,12 @@ def get_round_start_and_hole(wordle_num):
 def parse_wordle_text(text):
     """
     Parses individual free-form Wordle share snippets.
-    Tallies color squares and creates a clean text visualization for tooltips.
+    Aggressively strips all standard, web, and non-breaking whitespace anomalies.
     """
-    clean_text = text.replace(",", "").replace(" ", "")
+    # CRITICAL ADVANCED FIX: Strip commas, standard spaces, and any hidden web non-breaking spaces (\xa0)
+    clean_text = text.replace(",", "").replace(" ", "").replace("\xa0", "").strip()
     
-    # Identify the game index number and core raw score character
+    # Relaxed search captures 'Wordle' anywhere inside the block, absorbing asterisks (*)
     match = re.search(r"Wordle\s*(\d+)[^\d]*([1-6Xx])[/*]6", clean_text)
     if not match:
         return None, None
@@ -127,21 +128,18 @@ def parse_wordle_text(text):
     score_char = match.group(2)
     strokes = SCORE_MAP.get(score_char, 0)
     
-    # Color metrics extraction logic
+    # Tally up color grids safely
     greens = text.count("🟩")
     yellows = text.count("🟨")
-    
-    # Account for both dark mode (⬛) and light mode (⬜) missed squares
     misses = text.count("⬛") + text.count("⬜")
     
-    # Reconstruct the grid layout lines into a compact summary string
+    # Extract structural layout lines
     grid_lines = []
     for line in text.split("\n"):
         if any(emoji in line for emoji in ["🟩", "🟨", "⬛", "⬜"]):
             grid_lines.append(line.strip())
     grid_visual = "\n".join(grid_lines)
     
-    # Store all summary items into a data dictionary object
     pattern_data = {
         "strokes": strokes,
         "summary": f"🟩 {greens} | 🟨 {yellows} | 🟥 {misses}",
