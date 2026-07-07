@@ -117,7 +117,7 @@ if "player_profiles" not in st.session_state:
 # ----------------------------------------------------
 st.sidebar.header("👤 Player Profiles Manager")
 
-# Ensure default profiles match dynamic state
+# Safe identity assignment dropdown
 player_identity = st.sidebar.selectbox(
     "Who is uploading an individual score?",
     st.session_state.player_profiles,
@@ -132,6 +132,7 @@ with st.sidebar.expander("🛠️ Add, Edit, or Rename Players"):
             current_db = load_db()
             current_db["player_profiles"] = st.session_state.player_profiles
             save_db(current_db)
+            st.session_state.post_msg = f"✅ Added player profile: {new_player_name}"
             st.rerun()
             
     st.write("---")
@@ -148,11 +149,32 @@ with st.sidebar.expander("🛠️ Add, Edit, or Rename Players"):
             current_db["player_profiles"] = st.session_state.player_profiles
             current_db["current_round"] = st.session_state.scores
             save_db(current_db)
+            st.session_state.post_msg = f"✅ Renamed {player_to_rename} to {target_new_name}"
             st.rerun()
+
+# ----------------------------------------------------
+# EXTRA SAFETY FEATURES: RE-RACK & ERROR RESOLUTIONS
+# ----------------------------------------------------
+with st.sidebar.expander("🗑️ Troubleshooting & Deletions"):
+    st.write("Correct individual input anomalies or clear out duplicate scorecard rows below.")
+    target_del_p = st.selectbox("Target Player", st.session_state.player_profiles, key="del_p_sel")
+    target_del_hole = st.number_input("Target Hole # to Wipe", min_value=1, max_value=50, value=1, step=1)
+    
+    if st.button("❌ Wipe Single Score"):
+        h_str = str(target_del_hole)
+        if target_del_p in st.session_state.scores and h_str in st.session_state.scores[target_del_p]:
+            st.session_state.scores[target_del_p].pop(h_str)
+            current_db = load_db()
+            current_db["current_round"] = st.session_state.scores
+            save_db(current_db)
+            st.session_state.post_msg = f"🗑️ Successfully wiped Hole {target_del_hole} for {target_del_p}!"
+            st.rerun()
+        else:
+            st.sidebar.error("No record found matching those values.")
 
 st.sidebar.write("---")
 st.sidebar.header("🎯 Individual Entry")
-wordle_paste = st.sidebar.text_area("Paste Single Wordle Snippet", placeholder="Wordle 1,843 3/6...", height=90)
+wordle_paste = st.sidebar.text_area("Paste Single Wordle Snippet", placeholder="Wordle 1,843 5/6*...", height=90)
 
 if st.sidebar.button("🚀 Post Score to Database"):
     if not wordle_paste:
@@ -161,38 +183,42 @@ if st.sidebar.button("🚀 Post Score to Database"):
         w_num, strokes = parse_wordle_text(wordle_paste)
         if w_num is not None:
             _, hole = get_round_start_and_hole(w_num)
+            hole_str = str(hole)
+            
             if player_identity not in st.session_state.scores:
                 st.session_state.scores[player_identity] = {}
-            st.session_state.scores[player_identity][str(hole)] = strokes
+            
+            is_update = hole_str in st.session_state.scores[player_identity]
+            st.session_state.scores[player_identity][hole_str] = strokes
+            
             current_db = load_db()
             current_db["current_round"] = st.session_state.scores
             save_db(current_db)
-            shoutout = SCORE_NAMES.get(strokes, "🎯 SCORE")
-            st.toast(f"📢 {player_identity} secured a {shoutout} on Hole {hole}!", icon="⛳")
-            st.sidebar.success(f"Logged Hole {hole} (Wordle {w_num})")
+            
+            # FIXED CONFIRMATION HOOK: Stores messages inside permanent session memory before refresh
+            shoutout = SCORE_NAMES.get(strokes, f"{strokes} strokes")
+            if is_update:
+                st.session_state.post_msg = f"🔄 OVERWRITE SUCCESSFUL! Updated Hole {hole} (Wordle {w_num}) for {player_identity} to {shoutout}."
+            else:
+                st.session_state.post_msg = f"✅ READ SUCCESSFUL! Logged Hole {hole} (Wordle {w_num}) for {player_identity}: {shoutout}."
             st.rerun()
         else:
-            st.sidebar.error("Could not parse single text. Check alignment.")
+            st.sidebar.error("Regex Parsing Mismatch. Ensure the text starts with 'Wordle X,XXX Y/6'.")
 
 # ----------------------------------------------------
-# NEW EXTRA FEATURE: MESSENGER BULK THREAD PARSER
+# 4b. BULK THREAD PARSER
 # ----------------------------------------------------
 st.sidebar.write("---")
 st.sidebar.header("📂 Bulk Historical Messenger Input")
 with st.sidebar.expander("📬 Dump Chat Thread Data Here"):
-    st.write("Select which player sent the text below, paste the giant thread block, and the app will parse every Wordle score hidden in it.")
-    
     bulk_player = st.selectbox("Sender of this Chat Dump", st.session_state.player_profiles, key="bulk_p_sel")
-    bulk_text = st.text_area("Paste Chat Text Content", placeholder="Dan\nWordle 1,816 3/6*...\nArchive June 3...", height=250)
+    bulk_text = st.text_area("Paste Chat Text Content", placeholder="Dan\nWordle 1,816 3/6*...", height=150)
     
     if st.button("⚡ Parse & Save All Historical Text"):
         if not bulk_text:
             st.error("Paste text before compiling!")
         else:
-            # Clean up raw numeric string inputs to normalize missing delimiters
             clean_bulk = bulk_text.replace(",", "")
-            
-            # UPDATED FIXED REGEX PATTERN: Safely parses hard-mode records (Y/6*) within text walls
             matches = re.findall(r"Wordle\s*(\d+[\s\d]*)\s*([1-6Xx])[/*]6", clean_bulk)
             
             if not matches:
@@ -204,15 +230,11 @@ with st.sidebar.expander("📬 Dump Chat Thread Data Here"):
                     
                 for m in matches:
                     try:
-                        # Normalize interior formatting gaps (e.g., '1 810' to '1810')
                         raw_w_num = m[0].replace(" ", "").strip()
                         w_num = int(raw_w_num)
                         score_char = m[1]
                         strokes = SCORE_MAP.get(score_char, 0)
-                        
-                        # Match relative index using your even anchor engine rules
                         _, hole = get_round_start_and_hole(w_num)
-                        
                         st.session_state.scores[bulk_player][str(hole)] = strokes
                         success_count += 1
                     except Exception:
@@ -222,22 +244,35 @@ with st.sidebar.expander("📬 Dump Chat Thread Data Here"):
                     current_db = load_db()
                     current_db["current_round"] = st.session_state.scores
                     save_db(current_db)
-                    st.success(f"Successfully processed and stored {success_count} scores for {bulk_player}!")
+                    st.session_state.post_msg = f"⚡ BULK IMPORT SUCCESSFUL! Processed and saved {success_count} scores for {bulk_player}."
                     st.rerun()
                 else:
-                    st.error("Found patterns but structural execution failed during numerical mapping.")
+                    st.error("Pattern processing failed during internal structural extraction.")
+
 # ----------------------------------------------------
 # 5. DATA COMPUTATION & DYNAMICS
 # ----------------------------------------------------
+# PERSISTENT SYSTEM CONFIRMATION VIEWER
+if "post_msg" not in st.session_state:
+    st.session_state.post_msg = ""
+
+if st.session_state.post_msg:
+    st.success(st.session_state.post_msg)
+    st.session_state.post_msg = ""  # Wipes track after clean rendering
+
 active_players = list(st.session_state.scores.keys())
 
-if len(active_players) < 2:
-    st.info("👋 Waiting for both players to submit at least one score to activate the live scoreboard boards.")
+# Render immediate instructions if entirely clean scorecard database
+if not active_players:
+    st.info("⛳ The scoreboard matrix is vacant. Use the player profiles dashboard to configure profiles and upload entries!")
 else:
-    p1, p2 = active_players[0], active_players[1]
+    # Set fallback variables dynamically to allow structural table loops for single users
+    p1 = active_players[0]
+    p2 = active_players[1] if len(active_players) > 1 else None
     
+    # Calculate matrix limits safely
     p1_holes = [int(k) for k in st.session_state.scores[p1].keys()]
-    p2_holes = [int(k) for k in st.session_state.scores[p2].keys()]
+    p2_holes = [int(k) for k in st.session_state.scores[p2].keys()] if p2 else []
     max_submitted_hole = max(max(p1_holes) if p1_holes else 1, max(p2_holes) if p2_holes else 1)
     
     # 1. Isolation Math Matrix (Common holes only)
