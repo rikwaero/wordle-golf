@@ -579,7 +579,7 @@ else:
         st.markdown(f'<div class="metric-card" style="border-left-color: #3b82f6;"><h4 style="margin:0; color:white;">Status Phase</h4><p style="margin:5px 0 0 0; color:#cbd5e1; font-size:16px;">{status_text}</p></div>', unsafe_allow_html=True)
     
     # ----------------------------------------------------
-    # 9. SCOREBOARD MATRIX GRID WITH HTML TOOLTIPS
+    # 9. SCOREBOARD MATRIX GRID WITH HTML TOOLTIPS (FLAT)
     # ----------------------------------------------------
     st.subheader("📊 Tournament Scoreboard Matrix")
     st.caption("💡 Hover your mouse or press on a score entry to preview its color grids and block patterns!")
@@ -606,35 +606,9 @@ else:
             raw_grid = str(data_obj.get("grid", ""))
             clean_grid = raw_grid.replace("\\n", "<br>").replace("\n", "<br>").replace(r"\n", "<br>").strip()
             
-            return f"""
-            <div class="tooltip" style="position: relative; display: inline-block; cursor: help; font-weight: bold; color: #22c55e;">
-                {strokes:+}
-                <span class="tooltiptext" style="
-                    visibility: hidden;
-                    width: 170px;
-                    background-color: #1e293b;
-                    color: #fff;
-                    text-align: center;
-                    border: 1px solid #475569;
-                    border-radius: 6px;
-                    padding: 10px;
-                    position: absolute;
-                    z-index: 99;
-                    bottom: 125%;
-                    left: 50%;
-                    margin-left: -85px;
-                    opacity: 0;
-                    transition: opacity 0.2s;
-                    font-family: monospace;
-                    font-size: 13px;
-                    white-space: normal;
-                    line-height: 1.4;
-                    box-shadow: 0 10px 15px -3px rgba(0,0,0,0.5);
-                ">
-                    <b>Grid Details:</b><br>{summary}<br><br>{clean_grid}
-                </span>
-            </div>
-            """
+            # Formatted onto flat lines without leading indent spaces
+            cell_code = f'<div class="wordle-tooltip">{strokes:+}<span class="wordle-tooltiptext"><b>Grid Details:</b><br>{summary}<br><br>{clean_grid}</span></div>'
+            return cell_code
 
         p1_display = generate_cell_html(res1)
         p2_display = generate_cell_html(res2)
@@ -652,44 +626,38 @@ else:
             "Status": status_label
         })
         
-    # Build complete HTML table string
-    html_table = f"""
-    <table>
-        <thead>
-            <tr>
-                <th style="width: 25%;">Hole</th>
-                <th style="width: 25%;">{p1}</th>
-                <th style="width: 25%;">{p2_display_name}</th>
-                <th style="width: 25%;">Status</th>
-            </tr>
-        </thead>
-        <tbody>
-    """
+    # Build complete HTML string cleanly without any tab/space indents
+    html_table = "<table><thead><tr><th>Hole</th><th>" + str(p1) + "</th><th>" + str(p2_display_name) + "</th><th>Status</th></tr></thead><tbody>"
     
     for row in matrix_rows:
-        html_table += f"""
-            <tr>
-                <td><b>{row['Hole']}</b></td>
-                <td>{row['p1_val']}</td>
-                <td>{row['p2_val']}</td>
-                <td><span style="color: #94a3b8; font-size: 12px;">{row['Status']}</span></td>
-            </tr>
-        """
+        html_table += "<tr>"
+        html_table += "<td><b>" + str(row['Hole']) + "</b></td>"
+        html_table += "<td>" + str(row['p1_val']) + "</td>"
+        html_table += "<td>" + str(row['p2_val']) + "</td>"
+        html_table += "<td><span style='color: #94a3b8; font-size: 12px;'>" + str(row['Status']) + "</span></td>"
+        html_table += "</tr>"
         
-    html_table += """
-        </tbody>
-    </table>
-    """
+    html_table += "</tbody></table>"
     
-    # CRITICAL FIX: Use st.markdown with unsafe_allow_html to force visual rendering
-    st.markdown(html_table, unsafe_allow_html=True)
+    # Clean out any accidental newline code spaces before parsing
+    clean_html_table = html_table.replace("\n", "").strip()
     
-    # Stylesheet rules
+    # Render table to screen
+    st.markdown(clean_html_table, unsafe_allow_html=True)
+    
+    # Custom Scoreboard Stylesheet rules
     st.markdown("""
     <style>
-        .tooltip .tooltiptext {
+        .wordle-tooltip {
+            position: relative;
+            display: inline-block;
+            cursor: help;
+            font-weight: bold;
+            color: #22c55e;
+        }
+        .wordle-tooltip .wordle-tooltiptext {
             visibility: hidden;
-            width: 170px;
+            width: 180px;
             background-color: #1e293b;
             color: #fff;
             text-align: center;
@@ -700,16 +668,15 @@ else:
             z-index: 99;
             bottom: 125%;
             left: 50%;
-            margin-left: -85px;
+            margin-left: -90px;
             opacity: 0;
             transition: opacity 0.2s;
             font-family: monospace;
             font-size: 13px;
-            white-space: normal;
             line-height: 1.4;
             box-shadow: 0 10px 15px -3px rgba(0,0,0,0.5);
         }
-        .tooltip:hover .tooltiptext {
+        .wordle-tooltip:hover .wordle-tooltiptext {
             visibility: visible !important;
             opacity: 1 !important;
         }
@@ -756,6 +723,7 @@ else:
             st.session_state.scores = {}
             st.session_state.history = current_db["history"]
             st.rerun()
+
 
 # ----------------------------------------------------
 # 10. HISTORICAL CHAMPIONS ARCHIVE VIEW
