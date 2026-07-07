@@ -55,24 +55,43 @@ SCORE_NAMES = {-3: "🚀 ALBATROSS!", -2: "🦅 EAGLE!!", -1: "🐦 BIRDIE!", 0:
 # 2. CALCULATION ENGINE
 # ----------------------------------------------------
 def get_round_start_and_hole(wordle_num):
-    for test_num in range(wordle_num, wordle_num - 40, -1):
-        prefix = int(str(test_num)[:3])
-        if prefix % 2 == 0:
-            start_num = test_num
-            hole_num = (wordle_num - start_num) + 1
-            return start_num, hole_num
+    """
+    Finds the anchor Wordle number where the first 3 digits are even,
+    and returns the starting game number and the current hole (1-18).
+    
+    Example: Wordle 1843 -> Prefix is 184 (Even). Anchor is 1840. Hole is 4.
+    Example: Wordle 1842 -> Prefix is 184 (Even). Anchor is 1840. Hole is 3.
+    """
+    # Look backwards to find the base game number where this 3-digit block launched
+    for test_num in range(wordle_num, wordle_num - 30, -1):
+        # Extract the true first 3 digits of the number string
+        num_str = str(test_num).replace(",", "").replace(" ", "")
+        if len(num_str) >= 3:
+            prefix = int(num_str[:3])
+            # A round anchor triggers when the prefix becomes even
+            if prefix % 2 == 0:
+                # Find the true starting base game for this specific 3-digit even era
+                # It always rolls back to the 0-ending game of that block
+                base_prefix_string = num_str[:3]
+                start_num = int(base_prefix_string + "0")
+                
+                # Check if this calculation sits inside a valid 18-hole block windows
+                # If a user plays past hole 18, it scales naturally into playoff territory
+                hole_num = (wordle_num - start_num) + 1
+                return start_num, hole_num
+                
     return wordle_num, 1
 
 def parse_wordle_text(text):
     """
-    Parses the Wordle share text adaptive filter.
-    Handles commas, spaces, and the hard-mode asterisk (*) formatting cleanly.
+    Parses individual free-form Wordle share snippets.
+    Ignores leading chat notes, custom dates, or 'Archive' labels seamlessly.
     """
-    # Clean up commas or spaces in numbers so '1,843' becomes '1843'
+    # Clean commas and internal spacing layout traps inside game counters
     clean_text = text.replace(",", "").replace(" ", "")
     
-    # Updated pattern safely absorbs any characters or asterisks (*) between the score and the slash
-    match = re.search(r"Wordle(\d+)[^\d]*([1-6Xx])[/*]6", clean_text)
+    # Relaxed search captures 'Wordle' anywhere inside the block, absorbing asterisks (*)
+    match = re.search(r"Wordle\s*(\d+)[^\d]*([1-6Xx])[/*]6", clean_text)
     if match:
         w_num = int(match.group(1))
         score_char = match.group(2)
@@ -218,7 +237,10 @@ with st.sidebar.expander("📬 Dump Chat Thread Data Here"):
         if not bulk_text:
             st.error("Paste text before compiling!")
         else:
+            # Clean up comma punctuation to normalize numerical structures
             clean_bulk = bulk_text.replace(",", "")
+            
+            # Global match extracts every instance of a Wordle game, regardless of prepended text lines
             matches = re.findall(r"Wordle\s*(\d+[\s\d]*)\s*([1-6Xx])[/*]6", clean_bulk)
             
             if not matches:
@@ -230,11 +252,15 @@ with st.sidebar.expander("📬 Dump Chat Thread Data Here"):
                     
                 for m in matches:
                     try:
+                        # Extract and scrub interior spacing
                         raw_w_num = m[0].replace(" ", "").strip()
                         w_num = int(raw_w_num)
                         score_char = m[1]
                         strokes = SCORE_MAP.get(score_char, 0)
+                        
+                        # Process through your custom 18-hole prefix mapping rule
                         _, hole = get_round_start_and_hole(w_num)
+                        
                         st.session_state.scores[bulk_player][str(hole)] = strokes
                         success_count += 1
                     except Exception:
