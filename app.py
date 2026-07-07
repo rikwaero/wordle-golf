@@ -586,6 +586,7 @@ else:
     
     matrix_rows = []
     limit = max(18, max_submitted_hole)
+    p2_display_name = p2 if p2 else "Awaiting Opponent"
     
     for h in range(1, limit + 1):
         if h > 18 and h > max_submitted_hole:
@@ -594,24 +595,18 @@ else:
         res1 = st.session_state.scores[p1].get(str(h), None)
         res2 = st.session_state.scores[p2].get(str(h), None) if p2 else None
         
-        # Helper extraction functions to compile visual components safely
         def generate_cell_html(data_obj):
             if data_obj is None:
                 return "<span style='color: #64748b;'>⏳ Waiting</span>"
-                
-            # Safely support legacy numerical records if present in old files
             if not isinstance(data_obj, dict):
                 return f"<b>{data_obj:+}</b>"
                 
             strokes = data_obj.get("strokes", 0)
             summary = data_obj.get("summary", "")
+            raw_grid = str(data_obj.get("grid", ""))
+            clean_grid = raw_grid.replace("\\n", "<br>").replace("\n", "<br>").replace(r"\n", "<br>").strip()
             
-            # FIXED: Explicitly strip, sanitize, and convert literal code string '\n' entries into clean HTML breaks
-            raw_grid = data_obj.get("grid", "")
-            clean_grid = raw_grid.replace("\\n", "<br>").replace("\n", "<br>").strip()
-            
-            # Pure CSS HTML Tooltip Architecture
-            tooltip_html = f"""
+            return f"""
             <div class="tooltip" style="position: relative; display: inline-block; cursor: help; font-weight: bold; color: #22c55e;">
                 {strokes:+}
                 <span class="tooltiptext" style="
@@ -622,7 +617,7 @@ else:
                     text-align: center;
                     border: 1px solid #475569;
                     border-radius: 6px;
-                    padding: 8px;
+                    padding: 10px;
                     position: absolute;
                     z-index: 99;
                     bottom: 125%;
@@ -640,7 +635,6 @@ else:
                 </span>
             </div>
             """
-            return tooltip_html
 
         p1_display = generate_cell_html(res1)
         p2_display = generate_cell_html(res2)
@@ -649,22 +643,16 @@ else:
         if h > 18:
             row_label += " 🚨 [Playoff]"
             
-        p2_display_name = p2 if p2 else "Awaiting Opponent"
         status_label = "✅ Verified" if (res1 is not None and res2 is not None) else "📢 Unbalanced"
         
         matrix_rows.append({
             "Hole": row_label,
-            p1: p1_display,
-            p2_display_name: p2_display,
+            "p1_val": p1_display,
+            "p2_val": p2_display,
             "Status": status_label
         })
         
-    # ----------------------------------------------------
-    # REPLACED PANDAS WITH A CLEAN NATIVE HTML MATRIX PRINTER
-    # ----------------------------------------------------
-    p2_display_name = p2 if p2 else "Awaiting Opponent"
-    
-    # Constructing a clean, hardcoded HTML string architecture to completely bypass pandas formatting bugs
+    # Build complete HTML table string
     html_table = f"""
     <table>
         <thead>
@@ -678,14 +666,13 @@ else:
         <tbody>
     """
     
-    # Dynamically build rows cleanly without string escape characters
     for row in matrix_rows:
         html_table += f"""
             <tr>
                 <td><b>{row['Hole']}</b></td>
-                <td>{row[p1]}</td>
-                <td>{row[p2_display_name]}</td>
-                <td>{row['Status']}</td>
+                <td>{row['p1_val']}</td>
+                <td>{row['p2_val']}</td>
+                <td><span style="color: #94a3b8; font-size: 12px;">{row['Status']}</span></td>
             </tr>
         """
         
@@ -694,10 +681,10 @@ else:
     </table>
     """
     
-    # Render the master custom-built table directly to the app viewport canvas
-    st.write(html_table, unsafe_allow_html=True)
+    # CRITICAL FIX: Use st.markdown with unsafe_allow_html to force visual rendering
+    st.markdown(html_table, unsafe_allow_html=True)
     
-    # Master visual design style sheet definitions
+    # Stylesheet rules
     st.markdown("""
     <style>
         .tooltip .tooltiptext {
@@ -751,23 +738,20 @@ else:
     </style>
     """, unsafe_allow_html=True)
 
-
-# Archive Option
+    # Archive Option
     if round_ended:
         if st.button("📦 Archive Current Round Results & Clear Table"):
             current_db = load_db()
-            
             history_entry = {
                 "date_archived": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M"),
                 "winner": winner_name,
                 "summary": summary_msg
             }
             current_db["history"].append(history_entry)
-            current_db["current_round"] = {}  # Clears current round grid scores
+            current_db["current_round"] = {}
             current_db["player_profiles"] = st.session_state.player_profiles
             current_db["player_passwords"] = st.session_state.player_passwords
-            current_db["device_sessions"] = st.session_state.device_sessions  # Saves browser session cookie registry!
-            
+            current_db["device_sessions"] = st.session_state.device_sessions
             save_db(current_db)
             st.session_state.scores = {}
             st.session_state.history = current_db["history"]
