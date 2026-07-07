@@ -364,11 +364,29 @@ else:
     # ----------------------------------------------------
     # 8. MATCH OVERVIEW TOURNAMENT CARDS
     # ----------------------------------------------------
-    st.header("🏆 Live Standings")
+    # DYNAMIC ROUND SPAN CALCULATION
+    # Find the earliest hole submitted to figure out the active Wordle base anchor
+    all_submitted_holes = p1_holes + p2_holes
+    min_hole_found = min(all_submitted_holes) if all_submitted_holes else 1
+    
+    # Reconstruct any logged Wordle number from this round to extract the anchor
+    sample_hole = min_hole_found
+    for w_test in range(1000, 3000):
+        _, h_test = get_round_start_and_hole(w_test)
+        if h_test == sample_hole:
+            start_wordle_num, _ = get_round_start_and_hole(w_test)
+            break
+    else:
+        start_wordle_num = 1841  # Fallback anchor if verification loop misaligns
+        
+    end_wordle_num = start_wordle_num + 17
+    
+    # DISPLAY HEADER WITH DYNAMIC ROUND BOUNDARIES
+    st.header(f"🏆 Live Standings (Round: {start_wordle_num} - {end_wordle_num})")
+    
     col1, col2 = st.columns(2)
     
     with col1:
-        # Check if a second player actually exists before calculating a difference
         if p2:
             diff = reg_totals[p1] - reg_totals[p2]
             if diff < 0:
@@ -389,7 +407,6 @@ else:
         else:
             status_text = "⏳ Awaiting Player 2"
         st.markdown(f'<div class="metric-card" style="border-left-color: #3b82f6;"><h4 style="margin:0; color:white;">Status Phase</h4><p style="margin:5px 0 0 0; color:#cbd5e1; font-size:16px;">{status_text}</p></div>', unsafe_allow_html=True)
-
     # ----------------------------------------------------
     # 9. SCOREBOARD MATRIX GRID
     # ----------------------------------------------------
