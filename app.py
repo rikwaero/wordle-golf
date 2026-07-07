@@ -364,21 +364,44 @@ else:
     # ----------------------------------------------------
     # 8. MATCH OVERVIEW TOURNAMENT CARDS
     # ----------------------------------------------------
-    # DYNAMIC ROUND SPAN CALCULATION
-    # Find the earliest hole submitted to figure out the active Wordle base anchor
-    all_submitted_holes = p1_holes + p2_holes
-    min_hole_found = min(all_submitted_holes) if all_submitted_holes else 1
+    # COMPLETELY DYNAMIC ROUND SPAN ENGINE (HIGHEST CURRENT ERA)
+    # Default fallback era anchor
+    start_wordle_num = 1841  
     
-    # Reconstruct any logged Wordle number from this round to extract the anchor
-    sample_hole = min_hole_found
-    for w_test in range(1000, 3000):
-        _, h_test = get_round_start_and_hole(w_test)
-        if h_test == sample_hole:
-            start_wordle_num, _ = get_round_start_and_hole(w_test)
-            break
-    else:
-        start_wordle_num = 1841  # Fallback anchor if verification loop misaligns
+    # 1. Parse out all numbers found inside your raw text box strings 
+    # to find the absolute maximum Wordle number uploaded in this session
+    raw_text_pool = []
+    if "wordle_paste" in st.session_state and st.session_state.wordle_paste:
+        raw_text_pool.append(st.session_state.wordle_paste)
+    if "bulk_text" in st.session_state and st.session_state.bulk_text:
+        raw_text_pool.append(st.session_state.bulk_text)
         
+    extracted_nums = []
+    for txt in raw_text_pool:
+        found = [int(n.replace(",", "").replace(" ", "")) for n in re.findall(r"Wordle\s*(\d+[\s\d]*)", txt.replace(",", ""))]
+        extracted_nums.extend(found)
+        
+    # 2. Match the highest Wordle number against its relative golf hole matrix index
+    p1_holes = [int(k) for k in st.session_state.scores[p1].keys()]
+    p2_holes = [int(k) for k in st.session_state.scores[p2].keys()] if p2 else []
+    all_holes = p1_holes + p2_holes
+    
+    if extracted_nums and all_holes:
+        highest_w_num = max(extracted_nums)
+        highest_hole = max(all_holes)
+        
+        # Calculate exactly where Hole 1 launched for this specific highest game
+        base_start, _ = get_round_start_and_hole(highest_w_num)
+        start_wordle_num = base_start
+    elif all_holes:
+        # If text logs cleared but scores exist in database, check modern era range down from 2500
+        highest_hole = max(all_holes)
+        for w_test in range(2500, 1000, -1):
+            _, h_test = get_round_start_and_hole(w_test)
+            if h_test == highest_hole:
+                start_wordle_num, _ = get_round_start_and_hole(w_test)
+                break
+
     end_wordle_num = start_wordle_num + 17
     
     # DISPLAY HEADER WITH DYNAMIC ROUND BOUNDARIES
@@ -407,6 +430,7 @@ else:
         else:
             status_text = "⏳ Awaiting Player 2"
         st.markdown(f'<div class="metric-card" style="border-left-color: #3b82f6;"><h4 style="margin:0; color:white;">Status Phase</h4><p style="margin:5px 0 0 0; color:#cbd5e1; font-size:16px;">{status_text}</p></div>', unsafe_allow_html=True)
+    
     # ----------------------------------------------------
     # 9. SCOREBOARD MATRIX GRID
     # ----------------------------------------------------
