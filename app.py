@@ -163,7 +163,6 @@ def load_db():
                 return json.load(f)
         except Exception:
             pass
-    # Default schema if file doesn't exist
     return {"current_round": {}, "history": []}
 
 def save_db(data):
@@ -171,6 +170,8 @@ def save_db(data):
     with open(DB_FILE, "w") as f:
         json.dump(data, f, indent=4)
 
+# --- EXECUTE STORAGE SYSTEM SYNCHRONIZATION ---
+db_data = load_db()
 
 if "scores" not in st.session_state:
     st.session_state.scores = db_data.get("current_round", {})
@@ -179,23 +180,15 @@ if "history" not in st.session_state:
 if "player_profiles" not in st.session_state:
     st.session_state.player_profiles = db_data.get("player_profiles", ["Dan", "Rik"])
 
-# --- FORCE RESET PASSWORDS ---
+# --- FORCE RESET PASSWORDS KEY REGISTRY ---
 st.session_state.player_passwords = {"Dan": "YouareDan", "Rik": "YouareRik"}
 db_data["player_passwords"] = st.session_state.player_passwords
 save_db(db_data)
-# -----------------------------
 
+# --- TRACK PERSISTENT DEVICE TRACKING TOKENS ---
 if "device_sessions" not in st.session_state:
     st.session_state.device_sessions = db_data.get("device_sessions", {})
 
-if "current_user" not in st.session_state:
-    st.session_state.current_user = None
-
-# Persistent device-cookie registry to bypass login prompts on known browsers
-if "device_sessions" not in st.session_state:
-    st.session_state.device_sessions = db_data.get("device_sessions", {})
-
-# Auto-Login Logic: Check if this specific browser session context matches a saved user profile
 if "current_user" not in st.session_state:
     st.session_state.current_user = None
     
@@ -209,7 +202,6 @@ try:
 except Exception:
     pass
 
-# ====================================================
 
 # ----------------------------------------------------
 # 4. SIDEBAR IDENTITY & USER INPUT (PERSISTENT LOGIN)
