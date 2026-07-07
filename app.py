@@ -575,73 +575,112 @@ else:
         st.markdown(f'<div class="metric-card" style="border-left-color: #3b82f6;"><h4 style="margin:0; color:white;">Status Phase</h4><p style="margin:5px 0 0 0; color:#cbd5e1; font-size:16px;">{status_text}</p></div>', unsafe_allow_html=True)
     
     # ----------------------------------------------------
-    # 9. SCOREBOARD MATRIX GRID WITH HTML TOOLTIPS (FLAT)
+    # 9. HORIZONTAL TRADITIONAL GOLF SCORECARD MATRIX
     # ----------------------------------------------------
-    st.subheader("📊 Tournament Scoreboard Matrix")
-    st.caption("💡 Hover your mouse or press on a score entry to preview its color grids and block patterns!")
-    
-    matrix_rows = []
-    limit = max(18, max_submitted_hole)
-    p2_display_name = p2 if p2 else "Awaiting Opponent"
-    
-    for h in range(1, limit + 1):
-        if h > 18 and h > max_submitted_hole:
-            continue
-            
-        res1 = st.session_state.scores[p1].get(str(h), None)
-        res2 = st.session_state.scores[p2].get(str(h), None) if p2 else None
-        
-        def generate_cell_html(data_obj):
-            if data_obj is None:
-                return "<span style='color: #64748b;'>⏳ Waiting</span>"
-            if not isinstance(data_obj, dict):
-                return f"<b>{data_obj:+}</b>"
-                
-            strokes = data_obj.get("strokes", 0)
-            summary = data_obj.get("summary", "")
-            raw_grid = str(data_obj.get("grid", ""))
-            clean_grid = raw_grid.replace("\\n", "<br>").replace("\n", "<br>").replace(r"\n", "<br>").strip()
-            
-            # Formatted onto flat lines without leading indent spaces
-            cell_code = f'<div class="wordle-tooltip">{strokes:+}<span class="wordle-tooltiptext"><b>Grid Details:</b><br>{summary}<br><br>{clean_grid}</span></div>'
-            return cell_code
+    st.subheader("📊 Tournament Scorecard Matrix")
+    st.caption("💡 Hover your mouse or press on any cell score to preview its color grids and block patterns!")
 
-        p1_display = generate_cell_html(res1)
-        p2_display = generate_cell_html(res2)
+    # Establish lists of active player identities
+    p1_name = p1
+    p2_name = p2 if p2 else "Awaiting Opponent"
+    display_players = [p1_name]
+    if p2:
+        display_players.append(p2_name)
+
+    # Determine maximum layout boundaries including playoff extension rooms
+    p1_holes = [int(k) for k in st.session_state.scores[p1_name].keys()]
+    p2_holes = [int(k) for k in st.session_state.scores[p2_name].keys()] if p2 else []
+    all_holes_list = p1_holes + p2_holes
+    max_hole = max(max_holes_list) if all_holes_list else 18
+    limit_holes = max(18, max_hole)
+
+    # Compile the interactive HTML row data dictionary for each competitor
+    scorecard_rows = {}
+    for player in display_players:
+        # 1. Initialize empty cell maps
+        scorecard_rows[player] = {
+            "total": 0,
+            "front_9": 0,
+            "back_9": 0,
+            "holes_html": {}
+        }
         
-        row_label = f"Hole {h}"
-        if h > 18:
-            row_label += " 🚨 [Playoff]"
+        # 2. Iterate hole-by-hole to collect scores and build cell hover tooltips
+        for h in range(1, limit_holes + 1):
+            # Fetch data object if player profile is active
+            res = st.session_state.scores.get(player, {}).get(str(h), None) if player != "Awaiting Opponent" else None
             
-        status_label = "✅ Verified" if (res1 is not None and res2 is not None) else "📢 Unbalanced"
-        
-        matrix_rows.append({
-            "Hole": row_label,
-            "p1_val": p1_display,
-            "p2_val": p2_display,
-            "Status": status_label
-        })
-        
-    # Build complete HTML string cleanly without any tab/space indents
-    html_table = "<table><thead><tr><th>Hole</th><th>" + str(p1) + "</th><th>" + str(p2_display_name) + "</th><th>Status</th></tr></thead><tbody>"
+            if res is None:
+                cell_html = "<span style='color: #64748b;'>⏳</span>"
+            else:
+                # Handle fallback if old plain integer data format exists in database
+                if not isinstance(res, dict):
+                    strokes = int(res)
+                    summary = "Legacy Entry"
+                    clean_grid = ""
+                else:
+                    strokes = res.get("strokes", 0)
+                    summary = res.get("summary", "")
+                    raw_grid = str(res.get("grid", ""))
+                    clean_grid = raw_grid.replace("\\n", "<br>").replace("\n", "<br>").replace(r"\n", "<br>").strip()
+
+                # ONLY accumulate into scorecard totals if BOTH players have logged data for this specific hole
+                if p2 and str(h) in st.session_state.scores[p1_name] and str(h) in st.session_state.scores[p2_name]:
+                    scorecard_rows[player]["total"] += strokes
+                    if 1 <= h <= 9:
+                        scorecard_rows[player]["front_9"] += strokes
+                    elif 10 <= h <= 18:
+                        scorecard_rows[player]["back_9"] += strokes
+
+                # Generate clean interactive CSS tooltips for horizontal cells
+                cell_html = f'<div class="wordle-tooltip">{strokes:+}<span class="wordle-tooltiptext"><b>Hole {h} Grid:</b><br>{summary}<br><br>{clean_grid}</span></div>'
+            
+            scorecard_rows[player]["holes_html"][h] = cell_html
+
+    # ----------------------------------------------------
+    # ASSEMBLE STRUCTURAL HTML TABLE LAYOUT
+    # ----------------------------------------------------
+    # Build header row columns string dynamically
+    html_table = "<table><thead><tr>"
+    html_table += "<th>Competitor</th>"
+    html_table += "<th style='background-color: #d97706; color: white;'>Total</th>"
+    html_table += "<th style='background-color: #1e293b;'>F (1-9)</th>"
+    html_table += "<th style='background-color: #1e293b;'>B (10-18)</th>"
     
-    for row in matrix_rows:
+    # Generate columns for regulation holes + any active playoff frames
+    for h in range(1, limit_holes + 1):
+        lbl = str(h)
+        if h > 18:
+            lbl += "🚨"
+        html_table += f"<th>{lbl}</th>"
+    html_table += "</tr></thead><tbody>"
+
+    # Generate data rows for the active players
+    for player in display_players:
+        tot_str = f"{scorecard_rows[player]['total']:+}" if scorecard_rows[player]['total'] != 0 else "E"
+        f9_str = f"{scorecard_rows[player]['front_9']:+}" if scorecard_rows[player]['front_9'] != 0 else "E"
+        b9_str = f"{scorecard_rows[player]['back_9']:+}" if scorecard_rows[player]['back_9'] != 0 else "E"
+        
+        if player == "Awaiting Opponent":
+            tot_str, f9_str, b9_str = "⏳", "⏳", "⏳"
+
         html_table += "<tr>"
-        html_table += "<td><b>" + str(row['Hole']) + "</b></td>"
-        html_table += "<td>" + str(row['p1_val']) + "</td>"
-        html_table += "<td>" + str(row['p2_val']) + "</td>"
-        html_table += "<td><span style='color: #94a3b8; font-size: 12px;'>" + str(row['Status']) + "</span></td>"
-        html_table += "</tr>"
+        html_table += f"<td><b>{player}</b></td>"
+        html_table += f"<td style='background-color: rgba(217,119,6,0.15); font-weight: bold; color: #f59e0b;'>{tot_str}</td>"
+        html_table += f"<td>{f9_str}</td>"
+        html_table += f"<td>{b9_str}</td>"
         
+        for h in range(1, limit_holes + 1):
+            html_table += f"<td>{scorecard_rows[player]['holes_html'][h]}</td>"
+        html_table += "</tr>"
+
     html_table += "</tbody></table>"
-    
-    # Clean out any accidental newline code spaces before parsing
+
+    # Scrub newlines out to completely block Markdown text translation bugs
     clean_html_table = html_table.replace("\n", "").strip()
-    
-    # Render table to screen
     st.markdown(clean_html_table, unsafe_allow_html=True)
-    
-    # Custom Scoreboard Stylesheet rules
+
+    # Master Horizontal Scorecard Style Sheet
     st.markdown("""
     <style>
         .wordle-tooltip {
@@ -650,6 +689,8 @@ else:
             cursor: help;
             font-weight: bold;
             color: #22c55e;
+            text-align: center;
+            width: 100%;
         }
         .wordle-tooltip .wordle-tooltiptext {
             visibility: hidden;
@@ -661,8 +702,8 @@ else:
             border-radius: 6px;
             padding: 10px;
             position: absolute;
-            z-index: 99;
-            bottom: 125%;
+            z-index: 999;
+            bottom: 135%;
             left: 50%;
             margin-left: -90px;
             opacity: 0;
@@ -682,18 +723,29 @@ else:
             margin-top: 15px;
             background-color: #0f172a;
             border-radius: 8px;
-            overflow: hidden;
+            overflow-x: auto;
+            display: block;
         }
         th, td {
-            padding: 14px !important;
-            text-align: left;
-            border-bottom: 1px solid #1e293b;
+            padding: 10px 12px !important;
+            text-align: center !important;
+            border: 1px solid #1e293b;
             color: #e2e8f0;
+            min-width: 45px;
         }
         th {
             background-color: #1e293b;
             color: #f8fafc;
             font-weight: bold;
+            font-size: 13px;
+        }
+        td:first-child, th:first-child {
+            text-align: left !important;
+            min-width: 120px;
+            background-color: #111827;
+            position: sticky;
+            left: 0;
+            z-index: 10;
         }
         tr:hover {
             background-color: #1e293b;
@@ -701,7 +753,7 @@ else:
     </style>
     """, unsafe_allow_html=True)
 
-    # Archive Option
+    # Archive Option Layout Link
     if round_ended:
         if st.button("📦 Archive Current Round Results & Clear Table"):
             current_db = load_db()
@@ -719,6 +771,7 @@ else:
             st.session_state.scores = {}
             st.session_state.history = current_db["history"]
             st.rerun()
+
 
 
 # ----------------------------------------------------
