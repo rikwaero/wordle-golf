@@ -64,10 +64,20 @@ def get_round_start_and_hole(wordle_num):
     return wordle_num, 1
 
 def parse_wordle_text(text):
+    """
+    Parses the Wordle share text adaptive filter.
+    Handles commas, spaces, and the hard-mode asterisk (*) formatting cleanly.
+    """
+    # Clean up commas or spaces in numbers so '1,843' becomes '1843'
     clean_text = text.replace(",", "").replace(" ", "")
-    match = re.search(r"Wordle(\d+)([1-6Xx])/6", clean_text)
+    
+    # Updated pattern safely absorbs any characters or asterisks (*) between the score and the slash
+    match = re.search(r"Wordle(\d+)[^\d]*([1-6Xx])[/*]6", clean_text)
     if match:
-        return int(match.group(1)), SCORE_MAP.get(match.group(2), 0)
+        w_num = int(match.group(1))
+        score_char = match.group(2)
+        return w_num, SCORE_MAP.get(score_char, 0)
+        
     return None, None
 
 # ----------------------------------------------------
