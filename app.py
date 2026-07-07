@@ -659,13 +659,69 @@ else:
             "Status": status_label
         })
         
-    # Render using the custom pandas HTML generator to unlock pure interactive CSS capabilities
-    df_matrix = pd.DataFrame(matrix_rows)
-    st.write(df_matrix.to_html(escape=False, index=False), unsafe_allow_html=True)
+    # ----------------------------------------------------
+    # REPLACED PANDAS WITH A CLEAN NATIVE HTML MATRIX PRINTER
+    # ----------------------------------------------------
+    p2_display_name = p2 if p2 else "Awaiting Opponent"
     
-    # Append the interactive hover activation wrapper instructions to your master style sheet frame
+    # Constructing a clean, hardcoded HTML string architecture to completely bypass pandas formatting bugs
+    html_table = f"""
+    <table>
+        <thead>
+            <tr>
+                <th style="width: 25%;">Hole</th>
+                <th style="width: 25%;">{p1}</th>
+                <th style="width: 25%;">{p2_display_name}</th>
+                <th style="width: 25%;">Status</th>
+            </tr>
+        </thead>
+        <tbody>
+    """
+    
+    # Dynamically build rows cleanly without string escape characters
+    for row in matrix_rows:
+        html_table += f"""
+            <tr>
+                <td><b>{row['Hole']}</b></td>
+                <td>{row[p1]}</td>
+                <td>{row[p2_display_name]}</td>
+                <td>{row['Status']}</td>
+            </tr>
+        """
+        
+    html_table += """
+        </tbody>
+    </table>
+    """
+    
+    # Render the master custom-built table directly to the app viewport canvas
+    st.write(html_table, unsafe_allow_html=True)
+    
+    # Master visual design style sheet definitions
     st.markdown("""
     <style>
+        .tooltip .tooltiptext {
+            visibility: hidden;
+            width: 170px;
+            background-color: #1e293b;
+            color: #fff;
+            text-align: center;
+            border: 1px solid #475569;
+            border-radius: 6px;
+            padding: 10px;
+            position: absolute;
+            z-index: 99;
+            bottom: 125%;
+            left: 50%;
+            margin-left: -85px;
+            opacity: 0;
+            transition: opacity 0.2s;
+            font-family: monospace;
+            font-size: 13px;
+            white-space: normal;
+            line-height: 1.4;
+            box-shadow: 0 10px 15px -3px rgba(0,0,0,0.5);
+        }
         .tooltip:hover .tooltiptext {
             visibility: visible !important;
             opacity: 1 !important;
@@ -674,18 +730,27 @@ else:
             width: 100%;
             border-collapse: collapse;
             margin-top: 15px;
+            background-color: #0f172a;
+            border-radius: 8px;
+            overflow: hidden;
         }
         th, td {
-            padding: 12px !important;
+            padding: 14px !important;
             text-align: left;
-            border-bottom: 1px solid #334155;
+            border-bottom: 1px solid #1e293b;
+            color: #e2e8f0;
         }
         th {
             background-color: #1e293b;
             color: #f8fafc;
+            font-weight: bold;
+        }
+        tr:hover {
+            background-color: #1e293b;
         }
     </style>
     """, unsafe_allow_html=True)
+
 
 # Archive Option
     if round_ended:
