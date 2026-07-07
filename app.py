@@ -361,26 +361,33 @@ else:
             st.markdown(f'<div class="winner-banner">👑 TOURNAMENT CHAMPION: {winner_name.upper()}! 👑</div>', unsafe_allow_html=True)
             st.success(f"🏆 **Put on the green jacket, {winner_name}!**")
 
- # ----------------------------------------------------
+    # ----------------------------------------------------
     # 8. MATCH OVERVIEW TOURNAMENT CARDS
     # ----------------------------------------------------
     st.header("🏆 Live Standings")
     col1, col2 = st.columns(2)
     
     with col1:
-        diff = reg_totals[p1] - reg_totals[p2]
-        if diff < 0:
-            leader_str = f"⚡ **{p1}** leads by **{abs(diff)}** strokes (on synced holes)"
-        elif diff > 0:
-            leader_str = f"⚡ **{p2}** leads by **{abs(diff)}** strokes (on synced holes)"
+        # Check if a second player actually exists before calculating a difference
+        if p2:
+            diff = reg_totals[p1] - reg_totals[p2]
+            if diff < 0:
+                leader_str = f"⚡ **{p1}** leads by **{abs(diff)}** strokes (on synced holes)"
+            elif diff > 0:
+                leader_str = f"⚡ **{p2}** leads by **{abs(diff)}** strokes (on synced holes)"
+            else:
+                leader_str = "⚖️ **All Square!** Level scoreboards on verified entries."
         else:
-            leader_str = "⚖️ **All Square!** Level scoreboards on verified entries."
+            leader_str = f"🏌️‍♂️ **{p1}** is playing solo. Waiting for an opponent to log a score!"
             
         card_style = "metric-card playoff-card" if playoff_active else "metric-card"
         st.markdown(f'<div class="{card_style}"><h4 style="margin:0; color:white;">Synced Leader</h4><p style="margin:5px 0 0 0; color:#cbd5e1; font-size:16px;">{leader_str}</p></div>', unsafe_allow_html=True)
 
     with col2:
-        status_text = "🚨 PLAYOFFS ACTIVE" if playoff_active else f"⛳ Regulation: {len(reg_completed_holes)}/18 Holes Synced"
+        if p2:
+            status_text = "🚨 PLAYOFFS ACTIVE" if playoff_active else f"⛳ Regulation: {len(reg_completed_holes)}/18 Holes Synced"
+        else:
+            status_text = "⏳ Awaiting Player 2"
         st.markdown(f'<div class="metric-card" style="border-left-color: #3b82f6;"><h4 style="margin:0; color:white;">Status Phase</h4><p style="margin:5px 0 0 0; color:#cbd5e1; font-size:16px;">{status_text}</p></div>', unsafe_allow_html=True)
 
     # ----------------------------------------------------
@@ -394,34 +401,38 @@ else:
             continue
             
         s1 = st.session_state.scores[p1].get(str(h), None)
-        s2 = st.session_state.scores[p2].get(str(h), None)
+        # Safely get player 2's score only if player 2 exists
+        s2 = st.session_state.scores[p2].get(str(h), None) if p2 else None
         
         row_label = f"Hole {h}"
         if h > 18:
             row_label += " 🚨 [Playoff]"
             
+        p2_display_name = p2 if p2 else "Awaiting Opponent"
+        
         matrix_rows.append({
             "Hole": row_label,
             p1: f"{s1:+}" if s1 is not None else "⏳ Waiting",
-            p2: f"{s2:+}" if s2 is not None else "⏳ Waiting",
+            p2_display_name: f"{s2:+}" if s2 is not None else "⏳ Waiting",
             "Status": "✅ Verified" if (s1 is not None and s2 is not None) else "📢 Unbalanced"
         })
         
     st.dataframe(pd.DataFrame(matrix_rows), use_container_width=True, hide_index=True)
 
-# Archive Option
+    # Archive Option
     if round_ended:
         if st.button("📦 Archive Current Round Results & Clear Table"):
             current_db = load_db()
             
+            # Package structural history entry
             history_entry = {
                 "date_archived": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M"),
                 "winner": winner_name,
                 "summary": summary_msg
             }
             current_db["history"].append(history_entry)
-            current_db["current_round"] = {}  # Clears active scores
-            current_db["player_profiles"] = st.session_state.player_profiles  # Keeps player profiles!
+            current_db["current_round"] = {}  # Flush card clean
+            current_db["player_profiles"] = st.session_state.player_profiles
             
             save_db(current_db)
             st.session_state.scores = {}
