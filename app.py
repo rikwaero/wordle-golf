@@ -155,7 +155,6 @@ def parse_wordle_text(text):
 # ----------------------------------------------------
 DB_FILE = "golf_history.json"
 
-# --- FUNCTIONS MUST COME FIRST ---
 def load_db():
     """Loads all current round and historical data from the JSON file."""
     if os.path.exists(DB_FILE):
@@ -173,17 +172,24 @@ def save_db(data):
         json.dump(data, f, indent=4)
 
 
-# --- EXECUTABLE CODE CALLING THE FUNCTIONS MUST COME AFTER ---
-db_data = load_db()
-
 if "scores" not in st.session_state:
     st.session_state.scores = db_data.get("current_round", {})
 if "history" not in st.session_state:
     st.session_state.history = db_data.get("history", [])
 if "player_profiles" not in st.session_state:
     st.session_state.player_profiles = db_data.get("player_profiles", ["Dan", "Rik"])
-if "player_passwords" not in st.session_state:
-    st.session_state.player_passwords = db_data.get("player_passwords", {"Dan": "YouareDan", "Rik": "YouareRik"})
+
+# --- FORCE RESET PASSWORDS ---
+st.session_state.player_passwords = {"Dan": "YouareDan", "Rik": "YouareRik"}
+db_data["player_passwords"] = st.session_state.player_passwords
+save_db(db_data)
+# -----------------------------
+
+if "device_sessions" not in st.session_state:
+    st.session_state.device_sessions = db_data.get("device_sessions", {})
+
+if "current_user" not in st.session_state:
+    st.session_state.current_user = None
 
 # Persistent device-cookie registry to bypass login prompts on known browsers
 if "device_sessions" not in st.session_state:
