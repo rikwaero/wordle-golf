@@ -1016,7 +1016,57 @@ else:
                 lbl += "🚨"
             tbl += "<th>" + lbl + "</th>"
         tbl += "</tr></thead><tbody>"
-            
+
+        for player in PLAYERS:
+            tbl += "<tr>"
+            tbl += "<td><b>" + player + "</b></td>"
+
+            if title == "Front 9":
+                tot_val = scorecard_data[player]["total"]
+                tot_str = f"{tot_val:+}" if tot_val != 0 else "E"
+                f9_val = scorecard_data[player]["front_9"]
+                f9_str = f"{f9_val:+}" if f9_val != 0 else "E"
+                tbl += (
+                    "<td style='background-color: rgba(217,119,6,0.15); "
+                    "font-weight: bold; color: #f59e0b;'>" + tot_str + "</td>"
+                    "<td>" + f9_str + "</td>"
+                )
+            elif title == "Back 9":
+                b9_val = scorecard_data[player]["back_9"]
+                b9_str = f"{b9_val:+}" if b9_val != 0 else "E"
+                tbl += "<td>" + b9_str + "</td>"
+            elif title == "⚡ Playoffs":
+                tbl += "<td>—</td>"
+
+            for h in holes:
+                cell = scorecard_data[player]["holes_html"].get(
+                    h, "<span style='color:#64748b'>⏳</span>"
+                )
+                tbl += "<td>" + cell + "</td>"
+            tbl += "</tr>"
+
+        tbl += "</tbody></table>"
+        return tbl
+
+    # Render Front 9
+    st.markdown(
+        build_hole_table(front_9_holes, "Front 9").replace("\n", "").strip(),
+        unsafe_allow_html=True
+    )
+
+    # Render Back 9
+    st.markdown(
+        build_hole_table(back_9_holes, "Back 9").replace("\n", "").strip(),
+        unsafe_allow_html=True
+    )
+
+    # Render Playoffs if active
+    if playoff_holes_display:
+        st.markdown(
+            build_hole_table(playoff_holes_display, "⚡ Playoffs").replace("\n", "").strip(),
+            unsafe_allow_html=True
+        )
+
     # ----------------------------------------------------
     # 13. ARCHIVE BUTTON
     # ----------------------------------------------------
