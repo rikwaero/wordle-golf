@@ -10,7 +10,7 @@ from datetime import datetime
 # ----------------------------------------------------
 # 1. CONFIGURATION & STYLING
 # ----------------------------------------------------
-st.set_page_config(page_title="Dan and Rik's Wordle Golf", page_icon="⛳", layout="wide")
+st.set_page_config(page_title="Dan and Rik's Wordle Golf", page_icon="⛳")
 
 st.markdown("""
 <style>
@@ -112,6 +112,31 @@ st.markdown("""
     tr:hover {
         background-color: #1e293b;
     }
+    /* ---- MOBILE STYLES ---- */
+    @media (max-width: 768px) {
+        [data-testid="column"] {
+            width: 100% !important;
+            flex: 100% !important;
+            min-width: 100% !important;
+        }
+        table {
+            font-size: 11px !important;
+        }
+        th, td {
+            padding: 6px 4px !important;
+            min-width: 30px !important;
+        }
+        td:first-child, th:first-child {
+            min-width: 70px !important;
+        }
+        .wordle-tooltip .wordle-tooltiptext {
+            width: 140px !important;
+            font-size: 11px !important;
+            left: 0% !important;
+            margin-left: -70px !important;
+        }
+    }
+    
 </style>
 """, unsafe_allow_html=True)
 
@@ -905,13 +930,16 @@ else:
 
     # Only show regulation holes (1-18) plus playoff holes if active
     # Practice holes (19, 20) are recorded but not displayed
-    display_holes = list(range(1, 19))
+    front_9_holes = list(range(1, 10))
+    back_9_holes = list(range(10, 19))
+    playoff_holes_display = []
     if playoff_active or playoff_winner:
-        playoff_holes = [
+        playoff_holes_display = sorted([
             h for h in round_scores.keys()
             if h > 20
-        ]
-        display_holes += sorted(playoff_holes)
+        ])
+
+    display_holes = front_9_holes + back_9_holes + playoff_holes_display
 
     # Calculate totals for display
     scorecard_data = {}
@@ -926,8 +954,6 @@ else:
 
     for h in display_holes:
         h_data = round_scores.get(h, {})
-
-        # Check if both players have this hole for syncing
         both_have = all(p in h_data for p in PLAYERS)
 
         for player in PLAYERS:
@@ -945,7 +971,6 @@ else:
                     .strip()
                 )
 
-                # Only accumulate synced holes for totals
                 if both_have and h <= 18:
                     scorecard_data[player]["total"] += strokes
                     scorecard_data[player]["synced_count"] += 1
@@ -965,44 +990,80 @@ else:
 
     total_synced = scorecard_data[p1]["synced_count"]
 
-    # Build HTML table
-    html_table = "<table><thead><tr>"
-    html_table += "<th>Player</th>"
-    html_table += (
-        f"<th style='background-color: #d97706; color: white;'>"
-        f"Total ({total_synced})</th>"
+    def build_hole_table(holes, title):
+        """Builds an HTML table for a given set of holes."""
+        tbl = f"<p style='color:#94a3b8; font-weight:bold; margin-top:15px;'>{title}</p>"
+        tbl += "<table><thead><tr>"
+        tbl += "<th>Player</th>"
+        if title == "Front 9":
+            tbl += (
+                f"<th style='background-color: #d97706; color: white;'>"
+                f"Total ({total_synced})</th>"
+                f"<th style='background-color: #1e293b;'>F (1-9)</th>"
+            )
+        elif title == "Back 9":
+            tbl += (
+                f"<th style='background-color: #1e293b;'>B (10-18)</th>"
+            )
+        elif title == "⚡ Playoffs":
+            tbl += (
+                f"<th style='background-color: #ef4444; color:white;'>Playoff</th>"
+            )
+
+        for h in holes:
+            lbl = str(h)
+            if h > 18:
+                lbl += "🚨"
+            tbl += f"<th>{lbl}</th>"
+        tbl += "</tr></thead><tbody>"
+
+        for player in PLAYERS:
+            tbl += "<tr>"
+            tbl += f"<td><b>{player}</b></td>"
+
+            if title == "Front 9":
+                tot_val = scorecard_data[player]["total"]
+                tot_str = f"{tot_val:+}" if tot_val != 0 else "E"
+                f9_val = scorecard_data[player]["front_9"]
+                f9_str = f"{f9_val:+}" if f9_val != 0 else "E"
+                tbl += (
+                    f"<td style='background-color: rgba(217,119,6,0.15); "
+                    f"font-weight: bold; color: #f59e0b;'>{tot_str}</td>"
+                    f"<td>{f9_str}</td>"
+                )
+            elif title == "Back 9":
+                b9_val = scorecard_data[player]["back_9"]
+                b9_str = f"{b9_val:+}" if b9_val != 0 else "E"
+                tbl += f"<td>{b9_str}</td>"
+            elif title == "⚡ Playoffs":
+                tbl += "<td>—</td>"
+
+            for h in holes:
+                tbl += f"<td>{scorecard_data[player]['holes_html'].get(h, '<span style=color:#64748b>⏳</span>')}</td>"
+            tbl += "</tr>"
+
+        tbl += "</tbody></table>"
+        return tbl
+
+    # Render Front 9
+    st.markdown(
+        build_hole_table(front_9_holes, "Front 9").replace("\n", "").strip(),
+        unsafe_allow_html=True
     )
-    html_table += "<th style='background-color: #1e293b;'>F (1-9)</th>"
-    html_table += "<th style='background-color: #1e293b;'>B (10-18)</th>"
 
-    for h in display_holes:
-        lbl = str(h)
-        if h > 18:
-            lbl += "🚨"
-        html_table += f"<th>{lbl}</th>"
-    html_table += "</tr></thead><tbody>"
+    # Render Back 9
+    st.markdown(
+        build_hole_table(back_9_holes, "Back 9").replace("\n", "").strip(),
+        unsafe_allow_html=True
+    )
 
-    for player in PLAYERS:
-        tot_val = scorecard_data[player]["total"]
-        tot_str = f"{tot_val:+}" if tot_val != 0 else "E"
-        f9_val = scorecard_data[player]["front_9"]
-        f9_str = f"{f9_val:+}" if f9_val != 0 else "E"
-        b9_val = scorecard_data[player]["back_9"]
-        b9_str = f"{b9_val:+}" if b9_val != 0 else "E"
-
-        html_table += "<tr>"
-        html_table += f"<td><b>{player}</b></td>"
-        html_table += (
-            f"<td style='background-color: rgba(217,119,6,0.15); "
-            f"font-weight: bold; color: #f59e0b;'>{tot_str}</td>"
+    # Render Playoffs if active
+    if playoff_holes_display:
+        st.markdown(
+            build_hole_table(playoff_holes_display, "⚡ Playoffs").replace("\n", "").strip(),
+            unsafe_allow_html=True
         )
-        html_table += f"<td>{f9_str}</td>"
-        html_table += f"<td>{b9_str}</td>"
-        for h in display_holes:
-            html_table += f"<td>{scorecard_data[player]['holes_html'].get(h, '<span style=color:#64748b>⏳</span>')}</td>"
-        html_table += "</tr>"
 
-    html_table += "</tbody></table>"
     st.markdown(html_table.replace("\n", "").strip(), unsafe_allow_html=True)
 
     # ----------------------------------------------------
