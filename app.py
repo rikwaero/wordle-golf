@@ -266,26 +266,43 @@ def load_all_scores():
 def save_score(wordle_num, player, strokes, summary, grid):
     """Saves or updates a single score entry in the scores tab."""
     try:
-        ws = get_worksheet("scores")
+        # Step 1: Test connection
+        client = get_gsheet_client()
+        st.write(f"DEBUG 1: Client created: {client}")
+        
+        # Step 2: Test sheet open
+        sheet_url = st.secrets["sheet"]["url"]
+        spreadsheet = client.open_by_url(sheet_url)
+        st.write(f"DEBUG 2: Sheet opened: {spreadsheet.title}")
+        
+        # Step 3: Test worksheet access
+        ws = spreadsheet.worksheet("scores")
+        st.write(f"DEBUG 3: Worksheet accessed: {ws.title}")
+        
+        # Step 4: Test read
         records = ws.get_all_records()
+        st.write(f"DEBUG 4: Records read successfully: {len(records)} rows")
+        
+        # Step 5: Attempt write
         timestamp = datetime.now().isoformat()
-
-        # Check if entry already exists
         for i, r in enumerate(records):
             if int(r["wordle_num"]) == wordle_num and r["player"] == player:
                 row_idx = i + 2
+                st.write(f"DEBUG 5a: Updating existing row {row_idx}")
                 ws.update(
                     f"A{row_idx}:F{row_idx}",
                     [[wordle_num, player, strokes, summary, grid, timestamp]]
                 )
+                st.write("DEBUG 6a: Update complete!")
                 return
 
-        # New entry
+        st.write("DEBUG 5b: Appending new row")
         ws.append_row([wordle_num, player, strokes, summary, grid, timestamp])
+        st.write("DEBUG 6b: Append complete!")
 
     except Exception as e:
-        st.error(f"❌ SAVE FAILED: {e}")
-        st.exception(e)  # This will show the full traceback
+        st.error(f"❌ SAVE FAILED at: {e}")
+        st.exception(e)
 
 def delete_score(wordle_num, player):
     """Deletes a score entry from the scores tab."""
