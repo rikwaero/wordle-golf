@@ -470,6 +470,39 @@ def parse_wordle_text(text):
 
     return w_num, pattern_data
 
+import requests
+from bs4 import BeautifulSoup
+
+@st.cache_data(ttl=3600)  # Cache for 1 hour
+def get_wordle_answer(wordle_num):
+    """
+    Fetches the correct Wordle answer for a given puzzle number
+    from yourdictionary.com. Cached for 1 hour.
+    """
+    try:
+        url = "https://wordfinder.yourdictionary.com/wordle/answers/"
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/91.0.4472.124 Safari/537.36"
+            )
+        }
+        response = requests.get(url, headers=headers, timeout=10)
+        soup = BeautifulSoup(response.text, "html.parser")
+
+        # Find all answer entries on the page
+        # The page lists entries like "Wordle #1234: WORD"
+        text = soup.get_text()
+        pattern = rf"(?i)#\s*{wordle_num}\s*[:\-–]\s*([A-Za-z]{{5}})"
+        match = re.search(pattern, text)
+        if match:
+            return match.group(1).upper()
+        return None
+    except Exception:
+        return None
+
+
 # ----------------------------------------------------
 # 5. SESSION STATE INITIALIZATION
 # ----------------------------------------------------
