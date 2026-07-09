@@ -283,8 +283,10 @@ def save_score(wordle_num, player, strokes, summary, grid):
 
         # New entry
         ws.append_row([wordle_num, player, strokes, summary, grid, timestamp])
+
     except Exception as e:
-        st.error(f"Error saving score: {e}")
+        st.error(f"❌ SAVE FAILED: {e}")
+        st.exception(e)  # This will show the full traceback
 
 def delete_score(wordle_num, player):
     """Deletes a score entry from the scores tab."""
