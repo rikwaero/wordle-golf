@@ -308,23 +308,27 @@ def save_score(wordle_num, player, strokes, summary, grid):
     """Saves or updates a single score entry in the scores tab."""
     try:
         ws = get_worksheet("scores")
-        records = sheets_operation_with_retry(ws.get_all_records)
+        records = ws.get_all_records()
         timestamp = datetime.now().isoformat()
+        found_row = None
 
         for i, r in enumerate(records):
-            if int(r["wordle_num"]) == wordle_num and r["player"] == player:
-                row_idx = i + 2
-                sheets_operation_with_retry(
-                    lambda: ws.update(
-                        f"A{row_idx}:F{row_idx}",
-                        [[wordle_num, player, strokes, summary, grid, timestamp]]
-                    )
-                )
-                return
+            try:
+                if int(r["wordle_num"]) == int(wordle_num) and r["player"] == player:
+                    found_row = i + 2
+                    break
+            except (ValueError, TypeError):
+                continue
 
-        sheets_operation_with_retry(
-            lambda: ws.append_row([wordle_num, player, strokes, summary, grid, timestamp])
-        )
+        if found_row is not None:
+            ws.update(
+                f"A{found_row}:F{found_row}",
+                [[wordle_num, player, strokes, summary, grid, timestamp]]
+            )
+        else:
+            ws.append_row(
+                [wordle_num, player, strokes, summary, grid, timestamp]
+            )
 
     except Exception as e:
         st.error(f"❌ Save failed: {e}")
