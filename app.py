@@ -701,12 +701,16 @@ else:
     )
 
     if st.sidebar.button("🚀 Post Score to Database"):
+        st.write("DEBUG A: Button clicked")
         if not wordle_paste:
             st.sidebar.error("Please paste your Wordle snippet first!")
         else:
+            st.write("DEBUG B: Paste detected")
             w_num, pattern_data = parse_wordle_text(wordle_paste)
+            st.write(f"DEBUG C: Parsed w_num={w_num}, pattern_data={pattern_data}")
             if w_num is not None:
                 my_name = st.session_state.current_user
+                st.write(f"DEBUG D: Player={my_name}")
                 is_update = (
                     w_num in st.session_state.scores
                     and my_name in st.session_state.scores[w_num]
@@ -716,6 +720,7 @@ else:
                     st.session_state.scores[w_num] = {}
                 st.session_state.scores[w_num][my_name] = pattern_data
 
+                st.write("DEBUG E: About to call save_score")
                 save_score(
                     w_num,
                     my_name,
@@ -723,6 +728,7 @@ else:
                     pattern_data["summary"],
                     pattern_data["grid"]
                 )
+                st.write("DEBUG F: save_score returned")
 
                 _, hole = get_round_start_and_hole(w_num)
                 shoutout = SCORE_NAMES.get(pattern_data["strokes"], "Score logged")
@@ -736,12 +742,10 @@ else:
                         f"✅ Logged Wordle #{w_num} (Hole {hole}): {shoutout}"
                     )
 
-                # Clear the input box
                 st.session_state.clear_paste = not st.session_state.clear_paste
                 st.rerun()
             else:
                 st.sidebar.error("Could not parse Wordle text. Check your snippet!")
-
     # ----------------------------------------------------
     # BULK HISTORICAL IMPORT
     # ----------------------------------------------------
