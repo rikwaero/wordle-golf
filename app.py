@@ -384,26 +384,27 @@ def get_scores_for_round(scores_dict, round_start):
     """
     Filters scores_dict to only include entries belonging to a specific round.
     Returns {hole_num: {player: data}} for holes 1-20 of that round.
-    Also includes playoff holes (wordle numbers from the NEXT round start
-    that fall within holes 1-20 of that next round, if they served as playoffs).
+    Also includes playoff holes from the next round that served as playoffs.
     """
+    round_start = int(round_start)
     round_scores = {}
     round_end = round_start + 19  # holes 1-20
 
-    for w_num, player_data in scores_dict.items():
+    for w_num_raw, player_data in scores_dict.items():
+        try:
+            w_num = int(w_num_raw)
+        except (ValueError, TypeError):
+            continue
+
         r_start, hole_num = get_round_start_and_hole(w_num)
 
-        # Directly in this round
+        # Directly in this round (holes 1-20)
         if r_start == round_start and 1 <= hole_num <= 20:
             if hole_num not in round_scores:
                 round_scores[hole_num] = {}
             round_scores[hole_num].update(player_data)
 
-        # Could also be a playoff hole from this round
-        # (wordle nums that are hole 1+ of next round
-        # but serve as playoff holes 21+ of this round)
-        # These are wordle numbers > round_start + 19
-        # We include up to hole 30 to cover extended playoffs
+        # Playoff holes beyond hole 20 (wordle nums past round_end)
         if w_num > round_end and w_num <= round_start + 29:
             playoff_hole = w_num - round_start + 1
             if playoff_hole not in round_scores:
@@ -714,8 +715,16 @@ if st.session_state.post_msg:
 # ----------------------------------------------------
 # 8. DETERMINE ACTIVE ROUND
 # ----------------------------------------------------
-all_scores = st.session_state.scores  # {wordle_num: {player: data}}
+# Ensure all score keys are integers
+all_scores = {}
+for k, v in st.session_state.scores.items():
+    try:
+        all_scores[int(k)] = v
+    except (ValueError, TypeError):
+        continue
+
 all_round_starts = get_all_rounds_from_scores(all_scores)
+active_round_start = get_active_round(all_scores, PLAYERS)
 
 # Find the most recent round where BOTH players have at least one score
 PLAYERS = ["Dan", "Rik"]
@@ -725,14 +734,24 @@ def get_active_round(scores_dict, players):
     Returns the most recent round start where both players
     have at least one score entry.
     """
-    all_rounds = get_all_rounds_from_scores(scores_dict)
+    # Ensure all keys are integers before processing
+    clean_scores = {}
+    for k, v in scores_dict.items():
+        try:
+            clean_scores[int(k)] = v
+        except (ValueError, TypeError):
+            continue
+
+    all_rounds = get_all_rounds_from_scores(clean_scores)
+
     for round_start in reversed(all_rounds):
-        round_scores = get_scores_for_round(scores_dict, round_start)
+        round_scores = get_scores_for_round(clean_scores, round_start)
         players_in_round = set()
         for hole_data in round_scores.values():
             players_in_round.update(hole_data.keys())
         if all(p in players_in_round for p in players):
             return round_start
+
     # If no shared round, return most recent round with any scores
     if all_rounds:
         return all_rounds[-1]
