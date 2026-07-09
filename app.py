@@ -578,7 +578,7 @@ else:
             w_num_int = int(target_wordle_num)
             if (w_num_int in st.session_state.scores
                     and my_name in st.session_state.scores[w_num_int]):
-                del st.session_state.scores[w_num_int][my_name]
+                del st.session_state.scores[w_num_int][my_name]a
                 if not st.session_state.scores[w_num_int]:
                     del st.session_state.scores[w_num_int]
                 deleted = delete_score(w_num_int, my_name)
@@ -715,20 +715,11 @@ if st.session_state.post_msg:
 # ----------------------------------------------------
 # 8. DETERMINE ACTIVE ROUND
 # ----------------------------------------------------
-# Ensure all score keys are integers
-all_scores = {}
-for k, v in st.session_state.scores.items():
-    try:
-        all_scores[int(k)] = v
-    except (ValueError, TypeError):
-        continue
 
-all_round_starts = get_all_rounds_from_scores(all_scores)
-active_round_start = get_active_round(all_scores, PLAYERS)
-
-# Find the most recent round where BOTH players have at least one score
+# Define players list first
 PLAYERS = ["Dan", "Rik"]
 
+# Define function before calling it
 def get_active_round(scores_dict, players):
     """
     Returns the most recent round start where both players
@@ -757,7 +748,18 @@ def get_active_round(scores_dict, players):
         return all_rounds[-1]
     return None
 
+# Ensure all score keys are integers
+all_scores = {}
+for k, v in st.session_state.scores.items():
+    try:
+        all_scores[int(k)] = v
+    except (ValueError, TypeError):
+        continue
+
+# Now safe to call both
+all_round_starts = get_all_rounds_from_scores(all_scores)
 active_round_start = get_active_round(all_scores, PLAYERS)
+
 
 # ----------------------------------------------------
 # 9. MAIN SCOREBOARD
