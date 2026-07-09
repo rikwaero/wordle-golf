@@ -213,7 +213,7 @@ def delete_session(token):
 def load_all_scores():
     """
     Loads all scores from the scores tab.
-    Returns a dict keyed by wordle_num, then player.
+    Returns a dict keyed by wordle_num (int), then player.
     {wordle_num(int): {player: {strokes, summary, grid, timestamp}}}
     """
     try:
@@ -221,15 +221,18 @@ def load_all_scores():
         records = ws.get_all_records()
         scores = {}
         for r in records:
-            w_num = int(r["wordle_num"])
+            try:
+                w_num = int(r["wordle_num"])
+            except (ValueError, TypeError):
+                continue
             player = r["player"]
             if w_num not in scores:
                 scores[w_num] = {}
             scores[w_num][player] = {
                 "strokes": int(r["strokes"]),
-                "summary": r["summary"],
-                "grid": r["grid"],
-                "timestamp": r["timestamp"]
+                "summary": r.get("summary", ""),
+                "grid": r.get("grid", ""),
+                "timestamp": r.get("timestamp", "")
             }
         return scores
     except Exception as e:
@@ -345,11 +348,9 @@ def get_round_start_and_hole(wordle_num):
     - 1860 -> round 1841, hole 20 (practice)
     - 1861 -> round 1861, hole 1 (AND potential playoff hole 21 of round 1841)
     """
-    num_str = str(wordle_num)
+    # Force integer in case a string key comes in from JSON/Sheets
+    wordle_num = int(wordle_num)
 
-    # Find the round start by walking backwards
-    # to find the nearest number ending in X1
-    # where X (second to last digit) is even
     for candidate in range(wordle_num, wordle_num - 25, -1):
         c_str = str(candidate)
         last_digit = int(c_str[-1])
@@ -359,7 +360,6 @@ def get_round_start_and_hole(wordle_num):
             hole_num = wordle_num - round_start + 1
             return round_start, hole_num
 
-    # Fallback
     return wordle_num, 1
 
 def is_practice_hole(hole_num):
@@ -373,8 +373,11 @@ def get_all_rounds_from_scores(scores_dict):
     """
     round_starts = set()
     for w_num in scores_dict:
-        r_start, _ = get_round_start_and_hole(w_num)
-        round_starts.add(r_start)
+        try:
+            r_start, _ = get_round_start_and_hole(int(w_num))
+            round_starts.add(r_start)
+        except (ValueError, TypeError):
+            continue
     return sorted(round_starts)
 
 def get_scores_for_round(scores_dict, round_start):
