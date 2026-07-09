@@ -3,11 +3,14 @@ import os
 import json
 import streamlit as st
 import pandas as pd
+import gspread
+from google.oauth2.service_account import Credentials
+from datetime import datetime
 
 # ----------------------------------------------------
 # 1. CONFIGURATION & STYLING
 # ----------------------------------------------------
-st.set_page_config(page_title="Wordle Golf Pro Tour", page_icon="⛳", layout="wide")
+st.set_page_config(page_title="Dan and Rik's Wordle Golf", page_icon="⛳", layout="wide")
 
 st.markdown("""
 <style>
@@ -41,27 +44,6 @@ st.markdown("""
         font-style: italic;
         color: #e2e8f0;
         line-height: 1.6;
-    }
-    .tooltip .tooltiptext {
-        visibility: hidden;
-        width: 160px;
-        background-color: #1e293b;
-        color: #fff;
-        text-align: center;
-        border: 1px solid #475569;
-        border-radius: 6px;
-        padding: 8px;
-        position: absolute;
-        z-index: 99;
-        bottom: 125%;
-        left: 50%;
-        margin-left: -80px;
-        opacity: 0;
-        transition: opacity 0.2s;
-    }
-    .tooltip:hover .tooltiptext {
-        visibility: visible;
-        opacity: 1;
     }
     .wordle-tooltip {
         position: relative;
@@ -133,14 +115,12 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.title("⛳ Wordle Golf Pro Tour")
+st.title("⛳ Dan and Rik's Wordle Golf")
 st.write("Welcome to the clubhouse. Drop your scores, track the board, and catch the live broadcast.")
 
 # ----------------------------------------------------
 # CONSTANTS
 # ----------------------------------------------------
-DB_FILE = "golf_history.json"
-
 SCORE_MAP = {"1": -3, "2": -2, "3": -1, "4": 0, "5": 1, "6": 2, "X": 3, "x": 3}
 SCORE_NAMES = {
     -3: "🚀 ALBATROSS!",
@@ -153,45 +133,288 @@ SCORE_NAMES = {
 }
 
 # ----------------------------------------------------
-# 2. CALCULATION ENGINE
+# 2. GOOGLE SHEETS CONNECTION
+# ----------------------------------------------------
+@st.cache_resource
+def get_gsheet_client():
+    """Creates and caches the Google Sheets client."""
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive"
+    ]
+    credentials = Credentials.from_service_account_info(
+        st.secrets["gcp_service_account"],
+        scopes=scopes
+    )
+    return gspread.authorize(credentials)
+
+@st.cache_resource
+def get_sheet():
+    """Opens and caches the Google Sheet."""
+    client = get_gsheet_client()
+    sheet_url = st.secrets["sheet"]["url"]
+    return client.open_by_url(sheet_url)
+
+def get_worksheet(tab_name):
+    """Gets a specific worksheet tab by name."""
+    sheet = get_sheet()
+    return sheet.worksheet(tab_name)
+
+# ----------------------------------------------------
+# 3. DATABASE FUNCTIONS
+# ----------------------------------------------------
+def load_players():
+    """Loads player profiles and passwords from the players tab."""
+    try:
+        ws = get_worksheet("players")
+        records = ws.get_all_records()
+        profiles = [r["name"] for r in records]
+        passwords = {r["name"]: r["password"] for r in records}
+        return profiles, passwords
+    except Exception as e:
+        st.error(f"Error loading players: {e}")
+        return ["Dan", "Rik"], {"Dan": "YouareDan", "Rik": "YouareRik"}
+
+def load_sessions():
+    """Loads device sessions from the sessions tab."""
+    try:
+        ws = get_worksheet("sessions")
+        records = ws.get_all_records()
+        return {r["token"]: r["player"] for r in records}
+    except Exception:
+        return {}
+
+def save_session(token, player):
+    """Saves a device session to the sessions tab."""
+    try:
+        ws = get_worksheet("sessions")
+        records = ws.get_all_records()
+        tokens = [r["token"] for r in records]
+        if token in tokens:
+            row_idx = tokens.index(token) + 2
+            ws.update(f"A{row_idx}:C{row_idx}", [[token, player, datetime.now().isoformat()]])
+        else:
+            ws.append_row([token, player, datetime.now().isoformat()])
+    except Exception as e:
+        st.error(f"Error saving session: {e}")
+
+def delete_session(token):
+    """Removes a device session from the sessions tab."""
+    try:
+        ws = get_worksheet("sessions")
+        records = ws.get_all_records()
+        for i, r in enumerate(records):
+            if r["token"] == token:
+                ws.delete_rows(i + 2)
+                break
+    except Exception as e:
+        st.error(f"Error deleting session: {e}")
+
+def load_all_scores():
+    """
+    Loads all scores from the scores tab.
+    Returns a dict keyed by wordle_num, then player.
+    {wordle_num(int): {player: {strokes, summary, grid, timestamp}}}
+    """
+    try:
+        ws = get_worksheet("scores")
+        records = ws.get_all_records()
+        scores = {}
+        for r in records:
+            w_num = int(r["wordle_num"])
+            player = r["player"]
+            if w_num not in scores:
+                scores[w_num] = {}
+            scores[w_num][player] = {
+                "strokes": int(r["strokes"]),
+                "summary": r["summary"],
+                "grid": r["grid"],
+                "timestamp": r["timestamp"]
+            }
+        return scores
+    except Exception as e:
+        st.error(f"Error loading scores: {e}")
+        return {}
+
+def save_score(wordle_num, player, strokes, summary, grid):
+    """Saves or updates a single score entry in the scores tab."""
+    try:
+        ws = get_worksheet("scores")
+        records = ws.get_all_records()
+        timestamp = datetime.now().isoformat()
+
+        # Check if entry already exists
+        for i, r in enumerate(records):
+            if int(r["wordle_num"]) == wordle_num and r["player"] == player:
+                row_idx = i + 2
+                ws.update(
+                    f"A{row_idx}:F{row_idx}",
+                    [[wordle_num, player, strokes, summary, grid, timestamp]]
+                )
+                return
+
+        # New entry
+        ws.append_row([wordle_num, player, strokes, summary, grid, timestamp])
+    except Exception as e:
+        st.error(f"Error saving score: {e}")
+
+def delete_score(wordle_num, player):
+    """Deletes a score entry from the scores tab."""
+    try:
+        ws = get_worksheet("scores")
+        records = ws.get_all_records()
+        for i, r in enumerate(records):
+            if int(r["wordle_num"]) == wordle_num and r["player"] == player:
+                ws.delete_rows(i + 2)
+                return True
+        return False
+    except Exception as e:
+        st.error(f"Error deleting score: {e}")
+        return False
+
+def load_history():
+    """Loads archived round history from the history tab."""
+    try:
+        ws = get_worksheet("history")
+        records = ws.get_all_records()
+        history = []
+        for r in records:
+            entry = {
+                "round_start": int(r["round_start"]),
+                "date_archived": r["date_archived"],
+                "winner": r["winner"],
+                "summary": r["summary"],
+                "scorecard": json.loads(r["scorecard_json"]) if r["scorecard_json"] else {}
+            }
+            history.append(entry)
+        return history
+    except Exception as e:
+        st.error(f"Error loading history: {e}")
+        return []
+
+def save_history_entry(round_start, winner, summary, scorecard_dict):
+    """Saves a completed round to the history tab."""
+    try:
+        ws = get_worksheet("history")
+        ws.append_row([
+            round_start,
+            datetime.now().strftime("%Y-%m-%d %H:%M"),
+            winner,
+            summary,
+            json.dumps(scorecard_dict)
+        ])
+    except Exception as e:
+        st.error(f"Error saving history: {e}")
+
+def archive_round_scores(round_start):
+    """Deletes all scores belonging to a completed round from the scores tab."""
+    try:
+        ws = get_worksheet("scores")
+        records = ws.get_all_records()
+        rows_to_delete = []
+        for i, r in enumerate(records):
+            w_num = int(r["wordle_num"])
+            r_start, _ = get_round_start_and_hole(w_num)
+            if r_start == round_start:
+                rows_to_delete.append(i + 2)
+        # Delete in reverse to preserve row indices
+        for row_idx in sorted(rows_to_delete, reverse=True):
+            ws.delete_rows(row_idx)
+    except Exception as e:
+        st.error(f"Error archiving round scores: {e}")
+
+# ----------------------------------------------------
+# 4. ROUND LOGIC ENGINE
 # ----------------------------------------------------
 def get_round_start_and_hole(wordle_num):
     """
-    Extracts the anchor based on the 3-digit even prefix rule.
+    Determines the round start number and hole number for a given Wordle number.
+
+    Rules:
+    - A round starts at numbers where the last digit is 1
+      AND the second-to-last digit is even.
+    - Each round covers 18 holes (e.g. 1841-1858).
+    - Holes 19-20 (e.g. 1859-1860) are practice/playoff holes.
+    - Numbers like 1861 are BOTH hole 1 of the new round
+      AND potential playoff hole 21 of the previous round.
 
     Examples:
-    - Wordle 1841: Prefix 184 (even) -> Anchor 1840 -> Hole 1
-    - Wordle 1842: Prefix 184 (even) -> Anchor 1840 -> Hole 2
-    - Wordle 1843: Prefix 184 (even) -> Anchor 1840 -> Hole 3
+    - 1841 -> round 1841, hole 1
+    - 1858 -> round 1841, hole 18
+    - 1859 -> round 1841, hole 19 (practice)
+    - 1860 -> round 1841, hole 20 (practice)
+    - 1861 -> round 1861, hole 1 (AND potential playoff hole 21 of round 1841)
     """
-    num_str = str(wordle_num).replace(",", "").replace(" ", "")
+    num_str = str(wordle_num)
 
-    if len(num_str) >= 3:
-        prefix = int(num_str[:3])
-        if prefix % 2 == 0:
-            start_num = int(num_str[:3] + "0")
-        else:
-            even_prefix = prefix - 1
-            start_num = int(str(even_prefix) + "0")
-    else:
-        start_num = 1840
+    # Find the round start by walking backwards
+    # to find the nearest number ending in X1
+    # where X (second to last digit) is even
+    for candidate in range(wordle_num, wordle_num - 25, -1):
+        c_str = str(candidate)
+        last_digit = int(c_str[-1])
+        second_last_digit = int(c_str[-2]) if len(c_str) >= 2 else 0
+        if last_digit == 1 and second_last_digit % 2 == 0:
+            round_start = candidate
+            hole_num = wordle_num - round_start + 1
+            return round_start, hole_num
 
-    hole_num = wordle_num - start_num
+    # Fallback
+    return wordle_num, 1
 
-    if hole_num <= 0:
-        hole_num = 1
+def is_practice_hole(hole_num):
+    """Returns True if the hole is a practice hole (19 or 20)."""
+    return hole_num in (19, 20)
 
-    return start_num, hole_num
+def get_all_rounds_from_scores(scores_dict):
+    """
+    Given the full scores dict {wordle_num: {player: data}},
+    returns a sorted list of unique round start numbers.
+    """
+    round_starts = set()
+    for w_num in scores_dict:
+        r_start, _ = get_round_start_and_hole(w_num)
+        round_starts.add(r_start)
+    return sorted(round_starts)
 
+def get_scores_for_round(scores_dict, round_start):
+    """
+    Filters scores_dict to only include entries belonging to a specific round.
+    Returns {hole_num: {player: data}} for holes 1-20 of that round.
+    Also includes playoff holes (wordle numbers from the NEXT round start
+    that fall within holes 1-20 of that next round, if they served as playoffs).
+    """
+    round_scores = {}
+    round_end = round_start + 19  # holes 1-20
+
+    for w_num, player_data in scores_dict.items():
+        r_start, hole_num = get_round_start_and_hole(w_num)
+
+        # Directly in this round
+        if r_start == round_start and 1 <= hole_num <= 20:
+            if hole_num not in round_scores:
+                round_scores[hole_num] = {}
+            round_scores[hole_num].update(player_data)
+
+        # Could also be a playoff hole from this round
+        # (wordle nums that are hole 1+ of next round
+        # but serve as playoff holes 21+ of this round)
+        # These are wordle numbers > round_start + 19
+        # We include up to hole 30 to cover extended playoffs
+        if w_num > round_end and w_num <= round_start + 29:
+            playoff_hole = w_num - round_start + 1
+            if playoff_hole not in round_scores:
+                round_scores[playoff_hole] = {}
+            round_scores[playoff_hole].update(player_data)
+
+    return round_scores
 
 def parse_wordle_text(text):
     """
     Parses a Wordle share snippet and returns the puzzle number
     and a structured pattern data dictionary.
-    Strips commas, spaces, and non-breaking whitespace.
     """
     clean_text = text.replace(",", "").replace(" ", "").replace("\xa0", "").strip()
-
     match = re.search(r"Wordle\s*(\d+)[^\d]*([1-6Xx])[/*]6", clean_text)
     if not match:
         return None, None
@@ -218,68 +441,44 @@ def parse_wordle_text(text):
 
     return w_num, pattern_data
 
-
 # ----------------------------------------------------
-# 3. STATE MANAGEMENT (LOCAL FILE DATABASE SYSTEM)
+# 5. SESSION STATE INITIALIZATION
 # ----------------------------------------------------
-def load_db():
-    """Loads all current round and historical data from the JSON file."""
-    if os.path.exists(DB_FILE):
-        try:
-            with open(DB_FILE, "r") as f:
-                return json.load(f)
-        except Exception:
-            pass
-    return {"current_round": {}, "history": []}
-
-
-def save_db(data):
-    """Saves the tracking data back to disk."""
-    with open(DB_FILE, "w") as f:
-        json.dump(data, f, indent=4)
-
-
-# Initialize session state from DB
-db_data = load_db()
-
-if "scores" not in st.session_state:
-    st.session_state.scores = db_data.get("current_round", {})
-if "history" not in st.session_state:
-    st.session_state.history = db_data.get("history", [])
-if "player_profiles" not in st.session_state:
-    st.session_state.player_profiles = db_data.get("player_profiles", ["Dan", "Rik"])
 if "post_msg" not in st.session_state:
     st.session_state.post_msg = ""
-
-# Force-reset passwords each run (hardcoded)
-st.session_state.player_passwords = {"Dan": "YouareDan", "Rik": "YouareRik"}
-db_data["player_passwords"] = st.session_state.player_passwords
-save_db(db_data)
-
-if "device_sessions" not in st.session_state:
-    st.session_state.device_sessions = db_data.get("device_sessions", {})
 if "current_user" not in st.session_state:
     st.session_state.current_user = None
+if "scores" not in st.session_state:
+    st.session_state.scores = load_all_scores()
+if "history" not in st.session_state:
+    st.session_state.history = load_history()
+if "player_profiles" not in st.session_state:
+    profiles, passwords = load_players()
+    st.session_state.player_profiles = profiles
+    st.session_state.player_passwords = passwords
+if "device_sessions" not in st.session_state:
+    st.session_state.device_sessions = load_sessions()
+if "clear_paste" not in st.session_state:
+    st.session_state.clear_paste = False
 
-# Attempt to restore login from device session token
+# Restore login from device session
 try:
     from streamlit.web.server.websocket_headers import _get_websocket_headers
     headers = _get_websocket_headers()
     browser_token = (
         f"{headers.get('User-Agent', '')}_{headers.get('X-Forwarded-For', 'local')}"
     )
-    if browser_token in st.session_state.device_sessions:
+    if (st.session_state.current_user is None
+            and browser_token in st.session_state.device_sessions):
         st.session_state.current_user = st.session_state.device_sessions[browser_token]
 except Exception:
     browser_token = "fallback_local_token"
 
-
 # ----------------------------------------------------
-# 4. SIDEBAR: LOGIN
+# 6. SIDEBAR: LOGIN
 # ----------------------------------------------------
 st.sidebar.header("🔐 Pro Tour Player Login")
 
-# Re-derive browser token safely for sidebar use
 try:
     from streamlit.web.server.websocket_headers import _get_websocket_headers
     headers = _get_websocket_headers()
@@ -296,15 +495,9 @@ if st.session_state.current_user is None:
     )
     login_pwd = st.sidebar.text_input(
         "Enter Private Password",
-        type="password",
-        help="Default passwords are 'greenjacket1' and 'greenjacket2'"
+        type="password"
     )
     remember_me = st.sidebar.checkbox("Keep me logged in on this device", value=True)
-
-    if os.environ.get("STREAMLIT_RUNTIME_ENV") == "cloud":
-        st.sidebar.caption(
-            "💡 Check 'Keep me logged in' to bypass this prompt next time!"
-        )
 
     if st.sidebar.button("🚪 Enter Clubhouse"):
         correct_pwd = st.session_state.player_passwords.get(login_name)
@@ -312,25 +505,20 @@ if st.session_state.current_user is None:
             st.session_state.current_user = login_name
             if remember_me:
                 st.session_state.device_sessions[browser_token] = login_name
-                current_db = load_db()
-                current_db["device_sessions"] = st.session_state.device_sessions
-                save_db(current_db)
+                save_session(browser_token, login_name)
             st.session_state.post_msg = (
-                f"🔓 Welcome back, {login_name}! Device remembered successfully."
+                f"🔓 Welcome back, {login_name}!"
             )
             st.rerun()
         else:
             st.sidebar.error("Invalid passcode. Please try again.")
-
 else:
     st.sidebar.markdown(f"⛳ Logged in as: **{st.session_state.current_user}**")
 
     if st.sidebar.button("🔒 Log Out & Forget Device"):
         if browser_token in st.session_state.device_sessions:
-            st.session_state.device_sessions.pop(browser_token)
-            current_db = load_db()
-            current_db["device_sessions"] = st.session_state.device_sessions
-            save_db(current_db)
+            del st.session_state.device_sessions[browser_token]
+            delete_session(browser_token)
         st.session_state.current_user = None
         st.rerun()
 
@@ -340,7 +528,7 @@ else:
     # PROFILE ADMINISTRATION
     # ----------------------------------------------------
     with st.sidebar.expander("🛠️ Profile Administration"):
-        st.write("Register a new competitor profile or rename yours below.")
+        st.write("Register a new competitor profile.")
         new_player_name = st.text_input(
             "Add New Player Name",
             placeholder="e.g., Rory"
@@ -356,10 +544,11 @@ else:
                 if new_player_name not in st.session_state.player_profiles:
                     st.session_state.player_profiles.append(new_player_name)
                     st.session_state.player_passwords[new_player_name] = new_player_pwd
-                    current_db = load_db()
-                    current_db["player_profiles"] = st.session_state.player_profiles
-                    current_db["player_passwords"] = st.session_state.player_passwords
-                    save_db(current_db)
+                    try:
+                        ws = get_worksheet("players")
+                        ws.append_row([new_player_name, new_player_pwd])
+                    except Exception as e:
+                        st.error(f"Error saving player: {e}")
                     st.session_state.post_msg = f"✅ Created profile for {new_player_name}!"
                     st.rerun()
                 else:
@@ -371,40 +560,44 @@ else:
     # SCORECARD CORRECTIONS
     # ----------------------------------------------------
     with st.sidebar.expander("🗑️ Scorecard Corrections"):
-        st.write("Wipe a score from your active card. You can only modify your own scores.")
-        target_del_hole = st.number_input(
-            "Target Hole # to Wipe",
+        st.write("Delete a score from your card by entering the Wordle number.")
+        target_wordle_num = st.number_input(
+            "Wordle # to Delete",
             min_value=1,
-            max_value=50,
-            value=1,
+            max_value=99999,
+            value=1841,
             step=1
         )
 
-        if st.button("❌ Wipe Single Score"):
-            h_str = str(target_del_hole)
+        if st.button("❌ Delete This Score"):
             my_name = st.session_state.current_user
-            if (my_name in st.session_state.scores
-                    and h_str in st.session_state.scores[my_name]):
-                st.session_state.scores[my_name].pop(h_str)
-                current_db = load_db()
-                current_db["current_round"] = st.session_state.scores
-                save_db(current_db)
-                st.session_state.post_msg = (
-                    f"🗑️ Successfully wiped Hole {target_del_hole} from your card!"
-                )
-                st.rerun()
+            w_num_int = int(target_wordle_num)
+            if (w_num_int in st.session_state.scores
+                    and my_name in st.session_state.scores[w_num_int]):
+                del st.session_state.scores[w_num_int][my_name]
+                if not st.session_state.scores[w_num_int]:
+                    del st.session_state.scores[w_num_int]
+                deleted = delete_score(w_num_int, my_name)
+                if deleted:
+                    st.session_state.post_msg = (
+                        f"🗑️ Deleted Wordle #{w_num_int} from your card!"
+                    )
+                    st.rerun()
             else:
-                st.error("No recorded entry found for that hole on your card.")
+                st.error("No score found for that Wordle number on your card.")
 
     # ----------------------------------------------------
     # SINGLE SCORE SUBMISSION
     # ----------------------------------------------------
     st.sidebar.write("---")
     st.sidebar.header("🎯 Individual Entry")
+
+    paste_key = "wordle_paste_input_clear" if st.session_state.clear_paste else "wordle_paste_input"
     wordle_paste = st.sidebar.text_area(
         "Paste Single Wordle Snippet",
-        placeholder="Wordle 1,843 5/6*...",
-        height=90
+        placeholder="Wordle 1,845 4/6*...",
+        height=90,
+        key=paste_key
     )
 
     if st.sidebar.button("🚀 Post Score to Database"):
@@ -413,30 +606,38 @@ else:
         else:
             w_num, pattern_data = parse_wordle_text(wordle_paste)
             if w_num is not None:
-                _, hole = get_round_start_and_hole(w_num)
-                hole_str = str(hole)
                 my_name = st.session_state.current_user
+                is_update = (
+                    w_num in st.session_state.scores
+                    and my_name in st.session_state.scores[w_num]
+                )
 
-                if my_name not in st.session_state.scores:
-                    st.session_state.scores[my_name] = {}
+                if w_num not in st.session_state.scores:
+                    st.session_state.scores[w_num] = {}
+                st.session_state.scores[w_num][my_name] = pattern_data
 
-                is_update = hole_str in st.session_state.scores[my_name]
-                st.session_state.scores[my_name][hole_str] = pattern_data
+                save_score(
+                    w_num,
+                    my_name,
+                    pattern_data["strokes"],
+                    pattern_data["summary"],
+                    pattern_data["grid"]
+                )
 
-                current_db = load_db()
-                current_db["current_round"] = st.session_state.scores
-                save_db(current_db)
+                _, hole = get_round_start_and_hole(w_num)
+                shoutout = SCORE_NAMES.get(pattern_data["strokes"], "Score logged")
 
-                strokes = pattern_data["strokes"]
-                shoutout = SCORE_NAMES.get(strokes, f"{strokes} strokes")
                 if is_update:
                     st.session_state.post_msg = (
-                        f"🔄 OVERWRITE SUCCESSFUL! Updated Hole {hole} for you."
+                        f"🔄 Updated Wordle #{w_num} (Hole {hole}): {shoutout}"
                     )
                 else:
                     st.session_state.post_msg = (
-                        f"✅ READ SUCCESSFUL! Logged Hole {hole}: {shoutout}."
+                        f"✅ Logged Wordle #{w_num} (Hole {hole}): {shoutout}"
                     )
+
+                # Clear the input box
+                st.session_state.clear_paste = not st.session_state.clear_paste
                 st.rerun()
             else:
                 st.sidebar.error("Could not parse Wordle text. Check your snippet!")
@@ -445,10 +646,11 @@ else:
     # BULK HISTORICAL IMPORT
     # ----------------------------------------------------
     st.sidebar.write("---")
-    st.sidebar.header("📂 Bulk Historical Messenger Input")
+    st.sidebar.header("📂 Bulk Historical Import")
     with st.sidebar.expander("📬 Dump Chat Thread Data Here"):
         st.write(
-            f"Extracts Wordle results directly onto **{st.session_state.current_user}**'s card."
+            f"Extracts all Wordle results onto "
+            f"**{st.session_state.current_user}**'s card."
         )
         bulk_text = st.text_area(
             "Paste Chat Text Content",
@@ -456,16 +658,14 @@ else:
             height=150
         )
 
-        if st.button("⚡ Parse & Save All Historical Text"):
+        if st.button("⚡ Parse & Save All"):
             if not bulk_text:
                 st.error("Paste text before compiling!")
             else:
                 my_name = st.session_state.current_user
                 clean_bulk = bulk_text.replace(",", "")
-
-                # BUG FIX: regex now correctly unpacks two capture groups
                 matches = re.findall(
-                    r"Wordle\s*(\d+[\s\d]*)\s*([1-6Xx])[/*]6",
+                    r"Wordle\s*(\d[\d\s]*)\s+([1-6Xx])[/*]6",
                     clean_bulk
                 )
 
@@ -473,96 +673,116 @@ else:
                     st.error("No valid Wordle blocks found in that text.")
                 else:
                     success_count = 0
-                    if my_name not in st.session_state.scores:
-                        st.session_state.scores[my_name] = {}
-
                     for w_num_raw, score_char in matches:
                         try:
                             w_num = int(w_num_raw.replace(" ", "").strip())
                             strokes = SCORE_MAP.get(score_char, 0)
                             _, hole = get_round_start_and_hole(w_num)
-                            st.session_state.scores[my_name][str(hole)] = {
+
+                            pattern_data = {
                                 "strokes": strokes,
                                 "summary": "Bulk Import",
                                 "grid": ""
                             }
+
+                            if w_num not in st.session_state.scores:
+                                st.session_state.scores[w_num] = {}
+                            st.session_state.scores[w_num][my_name] = pattern_data
+
+                            save_score(w_num, my_name, strokes, "Bulk Import", "")
                             success_count += 1
                         except Exception:
                             continue
 
                     if success_count > 0:
-                        current_db = load_db()
-                        current_db["current_round"] = st.session_state.scores
-                        save_db(current_db)
                         st.session_state.post_msg = (
-                            f"⚡ BULK IMPORT SUCCESSFUL! Saved {success_count} scores."
+                            f"⚡ Bulk import successful! Saved {success_count} scores."
                         )
                         st.rerun()
                     else:
-                        st.error("No scores could be extracted from that text.")
-
-
+                        st.error("No scores could be extracted.")
 # ----------------------------------------------------
-# 5. POST MESSAGE DISPLAY
+# 7. POST MESSAGE DISPLAY
 # ----------------------------------------------------
 if st.session_state.post_msg:
     st.success(st.session_state.post_msg)
     st.session_state.post_msg = ""
 
 # ----------------------------------------------------
-# 6. DATA COMPUTATION & DYNAMICS
+# 8. DETERMINE ACTIVE ROUND
 # ----------------------------------------------------
-active_players = list(st.session_state.scores.keys())
+all_scores = st.session_state.scores  # {wordle_num: {player: data}}
+all_round_starts = get_all_rounds_from_scores(all_scores)
 
-if not active_players:
-    st.info(
-        "⛳ The scoreboard is empty. Configure profiles and upload scores to get started!"
-    )
+# Find the most recent round where BOTH players have at least one score
+PLAYERS = ["Dan", "Rik"]
+
+def get_active_round(scores_dict, players):
+    """
+    Returns the most recent round start where both players
+    have at least one score entry.
+    """
+    all_rounds = get_all_rounds_from_scores(scores_dict)
+    for round_start in reversed(all_rounds):
+        round_scores = get_scores_for_round(scores_dict, round_start)
+        players_in_round = set()
+        for hole_data in round_scores.values():
+            players_in_round.update(hole_data.keys())
+        if all(p in players_in_round for p in players):
+            return round_start
+    # If no shared round, return most recent round with any scores
+    if all_rounds:
+        return all_rounds[-1]
+    return None
+
+active_round_start = get_active_round(all_scores, PLAYERS)
+
+# ----------------------------------------------------
+# 9. MAIN SCOREBOARD
+# ----------------------------------------------------
+st.header("🏆 Live Standings")
+
+if active_round_start is None:
+    st.info("⛳ No scores yet. Log in and post your first Wordle result!")
 else:
-    p1 = active_players[0]
-    p2 = active_players[1] if len(active_players) > 1 else None
+    active_round_end = active_round_start + 17
+    st.subheader(f"Current Round: Wordle {active_round_start} – {active_round_end}")
 
-    p1_holes = [int(k) for k in st.session_state.scores[p1].keys()]
-    p2_holes = [int(k) for k in st.session_state.scores[p2].keys()] if p2 else []
-    max_submitted_hole = max(
-        max(p1_holes) if p1_holes else 1,
-        max(p2_holes) if p2_holes else 1
-    )
+    round_scores = get_scores_for_round(all_scores, active_round_start)
 
-    # Compute totals on synced (common) holes only
+    p1, p2 = PLAYERS[0], PLAYERS[1]
+
+    # Compute regulation totals (holes 1-18, both players synced)
     reg_completed_holes = []
-    reg_totals = {p1: 0}
-    if p2:
-        reg_totals[p2] = 0
+    reg_totals = {p1: 0, p2: 0}
 
     for h in range(1, 19):
-        res1 = st.session_state.scores[p1].get(str(h))
-        res2 = st.session_state.scores[p2].get(str(h)) if p2 else None
-
-        s1 = res1.get("strokes") if isinstance(res1, dict) else res1
-        s2 = res2.get("strokes") if isinstance(res2, dict) else res2
-
-        if s1 is not None and s2 is not None and p2:
+        h_data = round_scores.get(h, {})
+        s1_data = h_data.get(p1)
+        s2_data = h_data.get(p2)
+        s1 = s1_data["strokes"] if isinstance(s1_data, dict) else s1_data
+        s2 = s2_data["strokes"] if isinstance(s2_data, dict) else s2_data
+        if s1 is not None and s2 is not None:
             reg_completed_holes.append(h)
             reg_totals[p1] += s1
             reg_totals[p2] += s2
 
-    regulation_finished = len(reg_completed_holes) == 18 and p2 is not None
+    regulation_finished = len(reg_completed_holes)
+        regulation_complete = regulation_finished == 18
 
     # Playoff sudden death logic
     playoff_active = False
     playoff_winner = None
     current_playoff_hole = 19
 
-    if regulation_finished and reg_totals[p1] == reg_totals[p2]:
+    if regulation_complete and reg_totals[p1] == reg_totals[p2]:
         playoff_active = True
         while True:
-            res1_p = st.session_state.scores[p1].get(str(current_playoff_hole))
-            res2_p = st.session_state.scores[p2].get(str(current_playoff_hole))
-
-            # BUG FIX: extract strokes from dict if needed, same as regulation logic
-            s1_p = res1_p.get("strokes") if isinstance(res1_p, dict) else res1_p
-            s2_p = res2_p.get("strokes") if isinstance(res2_p, dict) else res2_p
+            h_data = round_scores.get(current_playoff_hole, {})
+            s1_data = h_data.get(p1)
+            s2_data = h_data.get(p2)
+            s1_p = s1_data["strokes"] if isinstance(s1_data, dict) else s1_data
+            s2_p = s2_data["strokes"] if isinstance(s2_data, dict) else s2_data
 
             if s1_p is not None and s2_p is not None:
                 if s1_p < s2_p:
@@ -576,43 +796,7 @@ else:
                 break
 
     # ----------------------------------------------------
-    # 7. BROADCAST COMMENTARY BOOTH
-    # ----------------------------------------------------
-    st.header("🎙️ Live Broadcast Booth")
-    if st.button("🎤 Get Live Broadcast Commentary"):
-        comm_list = []
-        if playoff_active:
-            comm_list.append(
-                "🎙️ 'Absolute deadlock! Regulation play couldn't split them. "
-                "We are out on the sudden-death track.'"
-            )
-        else:
-            comm_list.append(
-                "🎙️ 'Welcome to the gallery. We are monitoring a pristine "
-                "18-hole regulation round.'"
-            )
-            if p2:
-                diff = reg_totals[p1] - reg_totals[p2]
-                if diff == 0:
-                    comm_list.append(
-                        f"🎙️ 'Through the synced cards, it is an absolute tie "
-                        f"across {len(reg_completed_holes)} holes!'"
-                    )
-                else:
-                    leader = p2 if diff > 0 else p1
-                    chaser = p1 if diff > 0 else p2
-                    comm_list.append(
-                        f"🎙️ '**{leader}** holds a tight grip on the match, "
-                        f"putting pressure on **{chaser}**.'"
-                    )
-        st.markdown(
-            f'<div class="commentary-box">{"<br><br>".join(comm_list)}</div>',
-            unsafe_allow_html=True
-        )
-        st.write("---")
-
-    # ----------------------------------------------------
-    # 8. CHAMPIONSHIP RESOLUTIONS
+    # 10. CHAMPIONSHIP RESOLUTIONS
     # ----------------------------------------------------
     round_ended = False
     winner_name = None
@@ -632,7 +816,7 @@ else:
         )
         st.success(f"👏 **Pure ice in your veins, {winner_name}!**")
 
-    elif regulation_finished and not playoff_active:
+    elif regulation_complete and not playoff_active:
         if reg_totals[p1] != reg_totals[p2]:
             round_ended = True
             winner_name = p1 if reg_totals[p1] < reg_totals[p2] else p2
@@ -651,40 +835,21 @@ else:
             st.success(f"🏆 **Put on the green jacket, {winner_name}!**")
 
     # ----------------------------------------------------
-    # 9. LIVE STANDINGS CARDS
+    # 11. STANDINGS CARDS
     # ----------------------------------------------------
-    # Determine dynamic round boundary from submitted scores
-    start_wordle_num = 1841
-
-    p1_holes = [int(k) for k in st.session_state.scores[p1].keys()]
-    p2_holes = [int(k) for k in st.session_state.scores[p2].keys()] if p2 else []
-    all_holes = p1_holes + p2_holes
-
-    if all_holes:
-        highest_hole = max(all_holes)
-        for w_test in range(2500, 1000, -1):
-            _, h_test = get_round_start_and_hole(w_test)
-            if h_test == highest_hole:
-                start_wordle_num, _ = get_round_start_and_hole(w_test)
-                break
-
-    end_wordle_num = start_wordle_num + 17
-
-    st.header(f"🏆 Live Standings (Round: {start_wordle_num} – {end_wordle_num})")
-
     col1, col2 = st.columns(2)
 
     with col1:
-        if p2:
-            diff = reg_totals[p1] - reg_totals[p2]
-            if diff < 0:
-                leader_str = f"⚡ **{p1}** leads by **{abs(diff)}** strokes (synced holes)"
-            elif diff > 0:
-                leader_str = f"⚡ **{p2}** leads by **{abs(diff)}** strokes (synced holes)"
-            else:
-                leader_str = "⚖️ **All Square!** Level on verified entries."
+        diff = reg_totals[p1] - reg_totals[p2]
+        if diff < 0:
+            leader_str = f"⚡ **{p1}** leads by **{abs(diff)}** strokes (synced holes)"
+        elif diff > 0:
+            leader_str = f"⚡ **{p2}** leads by **{abs(diff)}** strokes (synced holes)"
         else:
-            leader_str = f"🏌️ **{p1}** is playing solo. Waiting for an opponent!"
+            if reg_completed_holes:
+                leader_str = "⚖️ **All Square!** Level on verified entries."
+            else:
+                leader_str = "⏳ Waiting for synced scores..."
 
         card_style = "metric-card playoff-card" if playoff_active else "metric-card"
         st.markdown(
@@ -696,46 +861,38 @@ else:
         )
 
     with col2:
-        if p2:
-            status_text = (
-                "🚨 PLAYOFFS ACTIVE" if playoff_active
-                else f"⛳ Regulation: {len(reg_completed_holes)}/18 Holes Synced"
-            )
+        if playoff_active:
+            status_text = f"🚨 PLAYOFFS ACTIVE (Hole {current_playoff_hole})"
         else:
-            status_text = "⏳ Awaiting Player 2"
+            status_text = f"⛳ Regulation: {regulation_finished}/18 Holes Synced"
         st.markdown(
             f'<div class="metric-card" style="border-left-color: #3b82f6;">'
-            f'<h4 style="margin:0; color:white;">Status Phase</h4>'
+            f'<h4 style="margin:0; color:white;">Round Status</h4>'
             f'<p style="margin:5px 0 0 0; color:#cbd5e1; font-size:16px;">{status_text}</p>'
             f'</div>',
             unsafe_allow_html=True
         )
 
     # ----------------------------------------------------
-    # 10. SCORECARD TABLE
+    # 12. SCORECARD TABLE
     # ----------------------------------------------------
-    st.subheader("📊 Tournament Scoreboard Matrix")
-    st.caption(
-        "💡 Hover over any score cell to preview its color grid and block pattern!"
-    )
+    st.subheader("📊 Tournament Scoreboard")
+    st.caption("💡 Hover over any score to see the color grid!")
 
-    p1_name = p1
-    p2_name = p2 if p2 else "Awaiting Opponent"
-    display_players = [p1_name] + ([p2_name] if p2 else [])
+    # Only show regulation holes (1-18) plus playoff holes if active
+    # Practice holes (19, 20) are recorded but not displayed
+    display_holes = list(range(1, 19))
+    if playoff_active or playoff_winner:
+        playoff_holes = [
+            h for h in round_scores.keys()
+            if h > 20
+        ]
+        display_holes += sorted(playoff_holes)
 
-    p1_holes = [int(k) for k in st.session_state.scores[p1_name].keys()]
-    p2_holes = (
-        [int(k) for k in st.session_state.scores[p2_name].keys()] if p2 else []
-    )
-    all_holes_list = p1_holes + p2_holes
-    max_hole = max(all_holes_list) if all_holes_list else 18
-    limit_holes = max(18, max_hole)
-
-    scorecard_rows = {}
-    total_synced_holes = 0
-
-    for player in display_players:
-        scorecard_rows[player] = {
+    # Calculate totals for display
+    scorecard_data = {}
+    for player in PLAYERS:
+        scorecard_data[player] = {
             "total": 0,
             "synced_count": 0,
             "front_9": 0,
@@ -743,84 +900,71 @@ else:
             "holes_html": {}
         }
 
-        for h in range(1, limit_holes + 1):
-            res = (
-                st.session_state.scores.get(player, {}).get(str(h))
-                if player != "Awaiting Opponent"
-                else None
-            )
+    for h in display_holes:
+        h_data = round_scores.get(h, {})
 
+        # Check if both players have this hole for syncing
+        both_have = all(p in h_data for p in PLAYERS)
+
+        for player in PLAYERS:
+            res = h_data.get(player)
             if res is None:
                 cell_html = "<span style='color: #64748b;'>⏳</span>"
             else:
-                if not isinstance(res, dict):
-                    strokes = int(res)
-                    summary = "Legacy Entry"
-                    clean_grid = ""
-                else:
-                    strokes = res.get("strokes", 0)
-                    summary = res.get("summary", "")
-                    raw_grid = str(res.get("grid", ""))
-                    clean_grid = (
-                        raw_grid
-                        .replace("\\n", "<br>")
-                        .replace("\n", "<br>")
-                        .strip()
-                    )
+                strokes = res["strokes"] if isinstance(res, dict) else int(res)
+                summary = res.get("summary", "") if isinstance(res, dict) else ""
+                raw_grid = res.get("grid", "") if isinstance(res, dict) else ""
+                clean_grid = (
+                    str(raw_grid)
+                    .replace("\\n", "<br>")
+                    .replace("\n", "<br>")
+                    .strip()
+                )
 
-                # Only accumulate totals on synced holes (both players submitted)
-                if p2 and (
-                    str(h) in st.session_state.scores.get(p1_name, {})
-                    and str(h) in st.session_state.scores.get(p2_name, {})
-                ):
-                    scorecard_rows[player]["total"] += strokes
-                    scorecard_rows[player]["synced_count"] += 1
+                # Only accumulate synced holes for totals
+                if both_have and h <= 18:
+                    scorecard_data[player]["total"] += strokes
+                    scorecard_data[player]["synced_count"] += 1
                     if 1 <= h <= 9:
-                        scorecard_rows[player]["front_9"] += strokes
+                        scorecard_data[player]["front_9"] += strokes
                     elif 10 <= h <= 18:
-                        scorecard_rows[player]["back_9"] += strokes
+                        scorecard_data[player]["back_9"] += strokes
 
                 cell_html = (
                     f'<div class="wordle-tooltip">{strokes:+}'
                     f'<span class="wordle-tooltiptext">'
-                    f'<b>Hole {h} Grid:</b><br>{summary}<br><br>{clean_grid}'
+                    f'<b>Hole {h}:</b><br>{summary}<br><br>{clean_grid}'
                     f'</span></div>'
                 )
 
-            scorecard_rows[player]["holes_html"][h] = cell_html
+            scorecard_data[player]["holes_html"][h] = cell_html
 
-    if p2 and p1_name in scorecard_rows:
-        total_synced_holes = scorecard_rows[p1_name]["synced_count"]
+    total_synced = scorecard_data[p1]["synced_count"]
 
     # Build HTML table
     html_table = "<table><thead><tr>"
-    html_table += "<th>Competitor</th>"
+    html_table += "<th>Player</th>"
     html_table += (
         f"<th style='background-color: #d97706; color: white;'>"
-        f"Total ({total_synced_holes})</th>"
+        f"Total ({total_synced})</th>"
     )
     html_table += "<th style='background-color: #1e293b;'>F (1-9)</th>"
     html_table += "<th style='background-color: #1e293b;'>B (10-18)</th>"
 
-    for h in range(1, limit_holes + 1):
+    for h in display_holes:
         lbl = str(h)
         if h > 18:
             lbl += "🚨"
         html_table += f"<th>{lbl}</th>"
     html_table += "</tr></thead><tbody>"
 
-    for player in display_players:
-        if player == "Awaiting Opponent":
-            tot_str = f9_str = b9_str = "⏳"
-        else:
-            tot_val = scorecard_rows[player]["total"]
-            tot_str = f"{tot_val:+}" if tot_val != 0 else "E"
-
-            f9_val = scorecard_rows[player]["front_9"]
-            f9_str = f"{f9_val:+}" if f9_val != 0 else "E"
-
-            b9_val = scorecard_rows[player]["back_9"]
-            b9_str = f"{b9_val:+}" if b9_val != 0 else "E"
+    for player in PLAYERS:
+        tot_val = scorecard_data[player]["total"]
+        tot_str = f"{tot_val:+}" if tot_val != 0 else "E"
+        f9_val = scorecard_data[player]["front_9"]
+        f9_str = f"{f9_val:+}" if f9_val != 0 else "E"
+        b9_val = scorecard_data[player]["back_9"]
+        b9_str = f"{b9_val:+}" if b9_val != 0 else "E"
 
         html_table += "<tr>"
         html_table += f"<td><b>{player}</b></td>"
@@ -830,48 +974,165 @@ else:
         )
         html_table += f"<td>{f9_str}</td>"
         html_table += f"<td>{b9_str}</td>"
-
-        for h in range(1, limit_holes + 1):
-            html_table += f"<td>{scorecard_rows[player]['holes_html'][h]}</td>"
+        for h in display_holes:
+            html_table += f"<td>{scorecard_data[player]['holes_html'].get(h, '<span style=color:#64748b>⏳</span>')}</td>"
         html_table += "</tr>"
 
     html_table += "</tbody></table>"
-
     st.markdown(html_table.replace("\n", "").strip(), unsafe_allow_html=True)
 
     # ----------------------------------------------------
-    # ARCHIVE OPTION
+    # 13. ARCHIVE BUTTON
     # ----------------------------------------------------
-    if round_ended:
-        if st.button("📦 Archive Current Round & Clear Table"):
-            current_db = load_db()
-            history_entry = {
-                "date_archived": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M"),
-                "winner": winner_name,
-                "summary": summary_msg
-            }
-            current_db["history"].append(history_entry)
-            current_db["current_round"] = {}
-            current_db["player_profiles"] = st.session_state.player_profiles
-            current_db["player_passwords"] = st.session_state.player_passwords
-            current_db["device_sessions"] = st.session_state.device_sessions
-            save_db(current_db)
-            st.session_state.scores = {}
-            st.session_state.history = current_db["history"]
+    if round_ended and st.session_state.current_user is not None:
+        if st.button("📦 Archive This Round & Start Fresh"):
+            # Build scorecard snapshot for history
+            scorecard_snapshot = {}
+            for h in display_holes:
+                h_data = round_scores.get(h, {})
+                scorecard_snapshot[str(h)] = {}
+                for player in PLAYERS:
+                    res = h_data.get(player)
+                    if res is not None:
+                        scorecard_snapshot[str(h)][player] = res
+
+            save_history_entry(
+                active_round_start,
+                winner_name,
+                summary_msg,
+                scorecard_snapshot
+            )
+            archive_round_scores(active_round_start)
+
+            # Reload scores from sheet
+            st.session_state.scores = load_all_scores()
+            st.session_state.history = load_history()
+            st.session_state.post_msg = "📦 Round archived successfully!"
             st.rerun()
 
+# ----------------------------------------------------
+# 14. BROADCAST COMMENTARY BOOTH
+# ----------------------------------------------------
+st.write("---")
+st.header("🎙️ Live Broadcast Booth")
+if active_round_start is not None:
+    if st.button("🎤 Get Live Commentary"):
+        comm_list = []
+        if playoff_active:
+            comm_list.append(
+                "🎙️ 'Absolute deadlock! Regulation couldn't split them. "
+                "We are in sudden death!'"
+            )
+        else:
+            comm_list.append(
+                "🎙️ 'Welcome to the clubhouse. "
+                "18-hole regulation is underway.'"
+            )
+            diff = reg_totals[p1] - reg_totals[p2]
+            if diff == 0 and reg_completed_holes:
+                comm_list.append(
+                    f"🎙️ 'Dead level through {len(reg_completed_holes)} synced holes!'"
+                )
+            elif diff != 0:
+                leader = p2 if diff > 0 else p1
+                chaser = p1 if diff > 0 else p2
+                comm_list.append(
+                    f"🎙️ '**{leader}** has the edge, "
+                    f"putting pressure on **{chaser}**.'"
+                )
+        st.markdown(
+            f'<div class="commentary-box">{"<br><br>".join(comm_list)}</div>',
+            unsafe_allow_html=True
+        )
 
 # ----------------------------------------------------
-# 11. HISTORICAL CHAMPIONS ARCHIVE VIEW
+# 15. HISTORICAL ARCHIVE
 # ----------------------------------------------------
 st.write("---")
 st.header("📜 Historical Tournament Records")
-if st.session_state.history:
-    df_hist = pd.DataFrame(st.session_state.history)
-    df_hist.columns = ["Timestamp Logged", "Champion 👑", "Match Summary Breakdown"]
-    st.dataframe(df_hist, use_container_width=True, hide_index=True)
+
+if not st.session_state.history:
+    st.caption("No completed rounds archived yet.")
 else:
-    st.caption(
-        "No historical games archived yet. "
-        "Complete an 18-hole segment to register the record book."
-    )
+    for i, entry in enumerate(reversed(st.session_state.history)):
+        round_start = entry["round_start"]
+        round_end = round_start + 17
+        label = (
+            f"Round {round_start}–{round_end} | "
+            f"🏆 {entry['winner']} | {entry['summary']} | "
+            f"📅 {entry['date_archived']}"
+        )
+        with st.expander(label):
+            scorecard = entry.get("scorecard", {})
+            if not scorecard:
+                st.caption("No scorecard data available.")
+            else:
+                # Build historical scorecard table
+                hist_holes = sorted([int(h) for h in scorecard.keys()])
+                hist_display = [h for h in hist_holes if h <= 18]
+                hist_playoff = [h for h in hist_holes if h > 20]
+                hist_display += hist_playoff
+
+                hist_table = "<table><thead><tr>"
+                hist_table += "<th>Player</th>"
+                hist_table += "<th style='background-color: #d97706; color:white;'>Total</th>"
+                hist_table += "<th>F (1-9)</th>"
+                hist_table += "<th>B (10-18)</th>"
+                for h in hist_display:
+                    lbl = str(h) + ("🚨" if h > 18 else "")
+                    hist_table += f"<th>{lbl}</th>"
+                hist_table += "</tr></thead><tbody>"
+
+                for player in PLAYERS:
+                    total = 0
+                    front = 0
+                    back = 0
+                    cells = {}
+
+                    for h in hist_display:
+                        h_data = scorecard.get(str(h), {})
+                        res = h_data.get(player)
+                        if res is None:
+                            cells[h] = "<span style='color:#64748b'>—</span>"
+                        else:
+                            strokes = res["strokes"] if isinstance(res, dict) else int(res)
+                            summary = res.get("summary", "") if isinstance(res, dict) else ""
+                            raw_grid = res.get("grid", "") if isinstance(res, dict) else ""
+                            clean_grid = (
+                                str(raw_grid)
+                                .replace("\\n", "<br>")
+                                .replace("\n", "<br>")
+                                .strip()
+                            )
+                            if h <= 18:
+                                total += strokes
+                                if 1 <= h <= 9:
+                                    front += strokes
+                                elif 10 <= h <= 18:
+                                    back += strokes
+
+                            cells[h] = (
+                                f'<div class="wordle-tooltip">{strokes:+}'
+                                f'<span class="wordle-tooltiptext">'
+                                f'<b>Hole {h}:</b><br>{summary}<br><br>{clean_grid}'
+                                f'</span></div>'
+                            )
+
+                    tot_str = f"{total:+}" if total != 0 else "E"
+                    f_str = f"{front:+}" if front != 0 else "E"
+                    b_str = f"{back:+}" if back != 0 else "E"
+
+                    hist_table += "<tr>"
+                    hist_table += f"<td><b>{player}</b></td>"
+                    hist_table += (
+                        f"<td style='background-color: rgba(217,119,6,0.15); "
+                        f"font-weight: bold; color: #f59e0b;'>{tot_str}</td>"
+                    )
+                    hist_table += f"<td>{f_str}</td>"
+                    hist_table += f"<td>{b_str}</td>"
+                    for h in hist_display:
+                        hist_table += f"<td>{cells.get(h, '<span style=color:#64748b>—</span>')}</td>"
+                    hist_table += "</tr>"
+
+                hist_table += "</tbody></table>"
+                st.markdown(hist_table.replace("\n", "").strip(), unsafe_allow_html=True)
