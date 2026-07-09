@@ -1293,3 +1293,105 @@ else:
 
                 hist_table += "</tbody></table>"
                 st.markdown(hist_table.replace("\n", "").strip(), unsafe_allow_html=True)
+
+
+# ----------------------------------------------------
+# TEMPORARY DIAGNOSTIC TOOL - REMOVE AFTER FIXING
+# ----------------------------------------------------
+st.write("---")
+with st.expander("🔧 Connection Diagnostics (Admin Only)"):
+    if st.button("🔍 Run Full Diagnostics"):
+        
+        # TEST 1: Secrets loaded correctly
+        st.write("**TEST 1: Checking secrets...**")
+        try:
+            sa_info = st.secrets["gcp_service_account"]
+            sheet_url = st.secrets["sheet"]["url"]
+            st.success(f"✅ Secrets loaded OK")
+            st.write(f"- Service account: `{sa_info['client_email']}`")
+            st.write(f"- Sheet URL: `{sheet_url[:50]}...`")
+        except Exception as e:
+            st.error(f"❌ Secrets failed: {e}")
+            st.stop()
+
+        # TEST 2: Credentials created
+        st.write("**TEST 2: Creating credentials...**")
+        try:
+            from google.oauth2.service_account import Credentials
+            scopes = [
+                "https://www.googleapis.com/auth/spreadsheets",
+                "https://www.googleapis.com/auth/drive"
+            ]
+            creds = Credentials.from_service_account_info(
+                st.secrets["gcp_service_account"],
+                scopes=scopes
+            )
+            st.success("✅ Credentials created OK")
+        except Exception as e:
+            st.error(f"❌ Credentials failed: {e}")
+            st.stop()
+
+        # TEST 3: gspread client
+        st.write("**TEST 3: Creating gspread client...**")
+        try:
+            import gspread
+            client = gspread.authorize(creds)
+            st.success("✅ gspread client created OK")
+        except Exception as e:
+            st.error(f"❌ gspread client failed: {e}")
+            st.stop()
+
+        # TEST 4: Open spreadsheet
+        st.write("**TEST 4: Opening spreadsheet...**")
+        try:
+            spreadsheet = client.open_by_url(st.secrets["sheet"]["url"])
+            st.success(f"✅ Spreadsheet opened: `{spreadsheet.title}`")
+        except Exception as e:
+            st.error(f"❌ Spreadsheet open failed: {e}")
+            st.write("**Common causes:**")
+            st.write("- Service account not added as Editor to the sheet")
+            st.write("- Google Drive API not enabled")
+            st.write("- Wrong sheet URL in secrets")
+            st.stop()
+
+        # TEST 5: List worksheets
+        st.write("**TEST 5: Listing worksheets...**")
+        try:
+            worksheets = spreadsheet.worksheets()
+            names = [ws.title for ws in worksheets]
+            st.success(f"✅ Found {len(worksheets)} worksheets: {names}")
+            
+            required_tabs = ["scores", "players", "sessions", "history"]
+            for tab in required_tabs:
+                if tab in names:
+                    st.write(f"  ✅ Tab `{tab}` exists")
+                else:
+                    st.error(f"  ❌ Tab `{tab}` is MISSING")
+        except Exception as e:
+            st.error(f"❌ Listing worksheets failed: {e}")
+            st.stop()
+
+        # TEST 6: Read from scores tab
+        st.write("**TEST 6: Reading scores tab...**")
+        try:
+            ws = spreadsheet.worksheet("scores")
+            records = ws.get_all_records()
+            st.success(f"✅ Read OK - {len(records)} rows found")
+        except Exception as e:
+            st.error(f"❌ Read failed: {e}")
+            st.stop()
+
+        # TEST 7: Write test
+        st.write("**TEST 7: Testing write access...**")
+        try:
+            ws = spreadsheet.worksheet("scores")
+            test_row = ["TEST", "DiagnosticBot", 0, "test", "", "delete_me"]
+            ws.append_row(test_row)
+            st.success("✅ Write successful! Check your sheet for a TEST row")
+            st.warning("⚠️ Delete the TEST row from your sheet manually!")
+        except Exception as e:
+            st.error(f"❌ Write failed: {e}")
+            st.write("**Common causes:**")
+            st.write("- Service account only has Viewer not Editor access")
+            st.write("- Google Sheets API not enabled")
+            st.write("- Sheet is protected")
