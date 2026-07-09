@@ -4,9 +4,8 @@ import json
 import time
 import hashlib
 import streamlit as st
+from supabase import create_client, Client
 import pandas as pd
-import gspread
-from google.oauth2.service_account import Credentials
 from datetime import datetime
 import requests
 from bs4 import BeautifulSoup
@@ -161,49 +160,17 @@ SCORE_NAMES = {
 PLAYERS = ["Dan", "Rik"]
 
 # ----------------------------------------------------
-# 2. GOOGLE SHEETS CONNECTION
+# 2. SUPABASE CONNECTION
 # ----------------------------------------------------
-@st.cache_resource(ttl=300)
-def get_spreadsheet():
-    """
-    Creates a Google Sheets connection cached for 5 minutes.
-    TTL ensures credentials are refreshed regularly.
-    """
-    scopes = [
-        "https://www.googleapis.com/auth/spreadsheets",
-        "https://www.googleapis.com/auth/drive"
-    ]
-    credentials = Credentials.from_service_account_info(
-        st.secrets["gcp_service_account"],
-        scopes=scopes
-    )
-    client = gspread.authorize(credentials)
-    return client.open_by_url(st.secrets["sheet"]["url"])
-
-def get_worksheet(tab_name):
-    """Gets a specific worksheet tab by name."""
-    return get_spreadsheet().worksheet(tab_name)
-
-def sheets_operation_with_retry(operation, max_retries=3):
-    """
-    Wraps a Google Sheets operation with exponential backoff retry.
-    Handles rate limiting (429) and transient errors gracefully.
-    """
-    for attempt in range(max_retries):
-        try:
-            return operation()
-        except gspread.exceptions.APIError as e:
-            if e.response.status_code == 429:
-                wait_time = (2 ** attempt)
-                time.sleep(wait_time)
-            else:
-                raise
-        except Exception:
-            raise
-    raise Exception("Google Sheets: Max retries exceeded. Please try again.")
+@st.cache_resource
+def get_supabase_client():
+    """Creates a Supabase client."""
+    url = st.secrets["supabase"]["url"]
+    key = st.secrets["supabase"]["key"]
+    return create_client(url, key)
 
 # ----------------------------------------------------
-# 3. BROWSER TOKEN (replaces broken private Streamlit API)
+# 3. BROWSER TOKEN
 # ----------------------------------------------------
 def get_browser_token():
     """
@@ -222,74 +189,64 @@ def get_browser_token():
 # 4. DATABASE FUNCTIONS
 # ----------------------------------------------------
 def load_players():
-    """Loads player profiles and passwords from the players tab."""
+    """Loads player profiles and passwords."""
     try:
-        ws = get_worksheet("players")
-        records = sheets_operation_with_retry(ws.get_all_records)
-        profiles = [r["name"] for r in records]
-        passwords = {r["name"]: r["password"] for r in records}
+        db = get_supabase_client()
+        result = db.table("players").select("*").execute()
+        profiles = [r["name"] for r in result.data]
+        passwords = {r["name"]: r["password"] for r in result.data}
         return profiles, passwords
     except Exception as e:
         st.error(f"Error loading players: {e}")
         return ["Dan", "Rik"], {"Dan": "YouareDan", "Rik": "YouareRik"}
 
+
 def load_sessions():
-    """Loads device sessions from the sessions tab."""
+    """Loads device sessions."""
     try:
-        ws = get_worksheet("sessions")
-        records = sheets_operation_with_retry(ws.get_all_records)
-        return {r["token"]: r["player"] for r in records}
+        db = get_supabase_client()
+        result = db.table("sessions").select("*").execute()
+        return {r["token"]: r["player"] for r in result.data}
     except Exception:
         return {}
 
+
 def save_session(token, player):
-    """Saves a device session to the sessions tab."""
+    """Saves or updates a device session."""
     try:
-        ws = get_worksheet("sessions")
-        records = sheets_operation_with_retry(ws.get_all_records)
-        tokens = [r["token"] for r in records]
-        if token in tokens:
-            row_idx = tokens.index(token) + 2
-            sheets_operation_with_retry(
-                lambda: ws.update(
-                    f"A{row_idx}:C{row_idx}",
-                    [[token, player, datetime.now().isoformat()]]
-                )
-            )
-        else:
-            sheets_operation_with_retry(
-                lambda: ws.append_row([token, player, datetime.now().isoformat()])
-            )
+        db = get_supabase_client()
+        db.table("sessions").upsert(
+            {
+                "token": token,
+                "player": player,
+                "timestamp": datetime.now().isoformat()
+            },
+            on_conflict="token"
+        ).execute()
     except Exception as e:
         st.error(f"Error saving session: {e}")
 
+
 def delete_session(token):
-    """Removes a device session from the sessions tab."""
+    """Removes a device session."""
     try:
-        ws = get_worksheet("sessions")
-        records = sheets_operation_with_retry(ws.get_all_records)
-        for i, r in enumerate(records):
-            if r["token"] == token:
-                sheets_operation_with_retry(lambda: ws.delete_rows(i + 2))
-                break
+        db = get_supabase_client()
+        db.table("sessions").delete().eq("token", token).execute()
     except Exception as e:
         st.error(f"Error deleting session: {e}")
 
+
 def load_all_scores():
     """
-    Loads all scores from the scores tab.
-    Returns a dict keyed by wordle_num (int), then player.
-    {wordle_num(int): {player: {strokes, summary, grid, timestamp}}}
+    Loads all scores.
+    Returns {wordle_num(int): {player: {strokes, summary, grid, timestamp}}}
     """
     try:
-        ws = get_worksheet("scores")
-        records = sheets_operation_with_retry(ws.get_all_records)
+        db = get_supabase_client()
+        result = db.table("scores").select("*").execute()
         scores = {}
-        for r in records:
-            try:
-                w_num = int(r["wordle_num"])
-            except (ValueError, TypeError):
-                continue
+        for r in result.data:
+            w_num = int(r["wordle_num"])
             player = r["player"]
             if w_num not in scores:
                 scores[w_num] = {}
@@ -304,57 +261,49 @@ def load_all_scores():
         st.error(f"Error loading scores: {e}")
         return {}
 
+
 def save_score(wordle_num, player, strokes, summary, grid):
-    """Saves or updates a single score entry in the scores tab."""
+    """Saves or updates a single score entry."""
     try:
-        ws = get_worksheet("scores")
-        records = ws.get_all_records()
-        timestamp = datetime.now().isoformat()
-        found_row = None
-
-        for i, r in enumerate(records):
-            try:
-                if int(r["wordle_num"]) == int(wordle_num) and r["player"] == player:
-                    found_row = i + 2
-                    break
-            except (ValueError, TypeError):
-                continue
-
-        if found_row is not None:
-            ws.update(
-                f"A{found_row}:F{found_row}",
-                [[wordle_num, player, strokes, summary, grid, timestamp]]
-            )
-        else:
-            ws.append_row(
-                [wordle_num, player, strokes, summary, grid, timestamp]
-            )
-
+        db = get_supabase_client()
+        db.table("scores").upsert(
+            {
+                "wordle_num": wordle_num,
+                "player": player,
+                "strokes": strokes,
+                "summary": summary,
+                "grid": grid,
+                "timestamp": datetime.now().isoformat()
+            },
+            on_conflict="wordle_num,player"
+        ).execute()
     except Exception as e:
         st.error(f"❌ Save failed: {e}")
         st.exception(e)
 
+
 def delete_score(wordle_num, player):
-    """Deletes a score entry from the scores tab."""
+    """Deletes a score entry."""
     try:
-        ws = get_worksheet("scores")
-        records = sheets_operation_with_retry(ws.get_all_records)
-        for i, r in enumerate(records):
-            if int(r["wordle_num"]) == wordle_num and r["player"] == player:
-                sheets_operation_with_retry(lambda: ws.delete_rows(i + 2))
-                return True
-        return False
+        db = get_supabase_client()
+        db.table("scores").delete().eq(
+            "wordle_num", wordle_num
+        ).eq(
+            "player", player
+        ).execute()
+        return True
     except Exception as e:
         st.error(f"Error deleting score: {e}")
         return False
 
+
 def load_history():
-    """Loads archived round history from the history tab."""
+    """Loads archived round history."""
     try:
-        ws = get_worksheet("history")
-        records = sheets_operation_with_retry(ws.get_all_records)
+        db = get_supabase_client()
+        result = db.table("history").select("*").order("round_start").execute()
         history = []
-        for r in records:
+        for r in result.data:
             entry = {
                 "round_start": int(r["round_start"]),
                 "date_archived": r["date_archived"],
@@ -368,35 +317,38 @@ def load_history():
         st.error(f"Error loading history: {e}")
         return []
 
+
 def save_history_entry(round_start, winner, summary, scorecard_dict):
-    """Saves a completed round to the history tab."""
+    """Saves a completed round to history."""
     try:
-        ws = get_worksheet("history")
-        sheets_operation_with_retry(
-            lambda: ws.append_row([
-                round_start,
-                datetime.now().strftime("%Y-%m-%d %H:%M"),
-                winner,
-                summary,
-                json.dumps(scorecard_dict)
-            ])
-        )
+        db = get_supabase_client()
+        db.table("history").insert({
+            "round_start": round_start,
+            "date_archived": datetime.now().isoformat(),
+            "winner": winner,
+            "summary": summary,
+            "scorecard_json": json.dumps(scorecard_dict)
+        }).execute()
     except Exception as e:
         st.error(f"Error saving history: {e}")
 
+
 def archive_round_scores(round_start):
-    """Deletes all scores belonging to a completed round from the scores tab."""
+    """Deletes all scores belonging to a completed round."""
     try:
-        ws = get_worksheet("scores")
-        records = sheets_operation_with_retry(ws.get_all_records)
-        rows_to_delete = []
-        for i, r in enumerate(records):
+        db = get_supabase_client()
+        result = db.table("scores").select("wordle_num").execute()
+        nums_to_delete = []
+        for r in result.data:
             w_num = int(r["wordle_num"])
             r_start, _ = get_round_start_and_hole(w_num)
             if r_start == round_start:
-                rows_to_delete.append(i + 2)
-        for row_idx in sorted(rows_to_delete, reverse=True):
-            sheets_operation_with_retry(lambda: ws.delete_rows(row_idx))
+                nums_to_delete.append(w_num)
+
+        if nums_to_delete:
+            db.table("scores").delete().in_(
+                "wordle_num", nums_to_delete
+            ).execute()
     except Exception as e:
         st.error(f"Error archiving round scores: {e}")
 
