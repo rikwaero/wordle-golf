@@ -1,11 +1,15 @@
 import re
 import os
 import json
+import time
+import hashlib
 import streamlit as st
 import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
 from datetime import datetime
+import requests
+from bs4 import BeautifulSoup
 
 # ----------------------------------------------------
 # 1. CONFIGURATION & STYLING
@@ -112,7 +116,6 @@ st.markdown("""
     tr:hover {
         background-color: #1e293b;
     }
-    /* ---- MOBILE STYLES ---- */
     @media (max-width: 768px) {
         [data-testid="column"] {
             width: 100% !important;
@@ -136,7 +139,6 @@ st.markdown("""
             margin-left: -70px !important;
         }
     }
-    
 </style>
 """, unsafe_allow_html=True)
 
@@ -156,13 +158,17 @@ SCORE_NAMES = {
      2: "❌ Double Bogey",
      3: "💥 TRIPLE BOGEY (FAIL)"
 }
+PLAYERS = ["Dan", "Rik"]
 
 # ----------------------------------------------------
 # 2. GOOGLE SHEETS CONNECTION
 # ----------------------------------------------------
-@st.cache_resource
-def get_gsheet_client():
-    """Creates a fresh Google Sheets client every time."""
+@st.cache_resource(ttl=300)
+def get_spreadsheet():
+    """
+    Creates a Google Sheets connection cached for 5 minutes.
+    TTL ensures credentials are refreshed regularly.
+    """
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive"
@@ -171,27 +177,55 @@ def get_gsheet_client():
         st.secrets["gcp_service_account"],
         scopes=scopes
     )
-    return gspread.authorize(credentials)
-
-def get_sheet():
-    """Opens a fresh Google Sheet connection every time."""
-    client = get_gsheet_client()
-    sheet_url = st.secrets["sheet"]["url"]
-    return client.open_by_url(sheet_url)
+    client = gspread.authorize(credentials)
+    return client.open_by_url(st.secrets["sheet"]["url"])
 
 def get_worksheet(tab_name):
     """Gets a specific worksheet tab by name."""
-    sheet = get_sheet()
-    return sheet.worksheet(tab_name)
+    return get_spreadsheet().worksheet(tab_name)
+
+def sheets_operation_with_retry(operation, max_retries=3):
+    """
+    Wraps a Google Sheets operation with exponential backoff retry.
+    Handles rate limiting (429) and transient errors gracefully.
+    """
+    for attempt in range(max_retries):
+        try:
+            return operation()
+        except gspread.exceptions.APIError as e:
+            if e.response.status_code == 429:
+                wait_time = (2 ** attempt)
+                time.sleep(wait_time)
+            else:
+                raise
+        except Exception:
+            raise
+    raise Exception("Google Sheets: Max retries exceeded. Please try again.")
 
 # ----------------------------------------------------
-# 3. DATABASE FUNCTIONS
+# 3. BROWSER TOKEN (replaces broken private Streamlit API)
+# ----------------------------------------------------
+def get_browser_token():
+    """
+    Generates a stable browser token using Streamlit's supported API.
+    Falls back gracefully if context headers are unavailable.
+    """
+    try:
+        user_agent = st.context.headers.get("User-Agent", "default")
+        forwarded_for = st.context.headers.get("X-Forwarded-For", "local")
+        raw = f"{user_agent}_{forwarded_for}"
+        return hashlib.md5(raw.encode()).hexdigest()
+    except Exception:
+        return "fallback_local_token"
+
+# ----------------------------------------------------
+# 4. DATABASE FUNCTIONS
 # ----------------------------------------------------
 def load_players():
     """Loads player profiles and passwords from the players tab."""
     try:
         ws = get_worksheet("players")
-        records = ws.get_all_records()
+        records = sheets_operation_with_retry(ws.get_all_records)
         profiles = [r["name"] for r in records]
         passwords = {r["name"]: r["password"] for r in records}
         return profiles, passwords
@@ -203,7 +237,7 @@ def load_sessions():
     """Loads device sessions from the sessions tab."""
     try:
         ws = get_worksheet("sessions")
-        records = ws.get_all_records()
+        records = sheets_operation_with_retry(ws.get_all_records)
         return {r["token"]: r["player"] for r in records}
     except Exception:
         return {}
@@ -212,13 +246,20 @@ def save_session(token, player):
     """Saves a device session to the sessions tab."""
     try:
         ws = get_worksheet("sessions")
-        records = ws.get_all_records()
+        records = sheets_operation_with_retry(ws.get_all_records)
         tokens = [r["token"] for r in records]
         if token in tokens:
             row_idx = tokens.index(token) + 2
-            ws.update(f"A{row_idx}:C{row_idx}", [[token, player, datetime.now().isoformat()]])
+            sheets_operation_with_retry(
+                lambda: ws.update(
+                    f"A{row_idx}:C{row_idx}",
+                    [[token, player, datetime.now().isoformat()]]
+                )
+            )
         else:
-            ws.append_row([token, player, datetime.now().isoformat()])
+            sheets_operation_with_retry(
+                lambda: ws.append_row([token, player, datetime.now().isoformat()])
+            )
     except Exception as e:
         st.error(f"Error saving session: {e}")
 
@@ -226,10 +267,10 @@ def delete_session(token):
     """Removes a device session from the sessions tab."""
     try:
         ws = get_worksheet("sessions")
-        records = ws.get_all_records()
+        records = sheets_operation_with_retry(ws.get_all_records)
         for i, r in enumerate(records):
             if r["token"] == token:
-                ws.delete_rows(i + 2)
+                sheets_operation_with_retry(lambda: ws.delete_rows(i + 2))
                 break
     except Exception as e:
         st.error(f"Error deleting session: {e}")
@@ -242,7 +283,7 @@ def load_all_scores():
     """
     try:
         ws = get_worksheet("scores")
-        records = ws.get_all_records()
+        records = sheets_operation_with_retry(ws.get_all_records)
         scores = {}
         for r in records:
             try:
@@ -266,52 +307,37 @@ def load_all_scores():
 def save_score(wordle_num, player, strokes, summary, grid):
     """Saves or updates a single score entry in the scores tab."""
     try:
-        # Step 1: Test connection
-        client = get_gsheet_client()
-        st.write(f"DEBUG 1: Client created: {client}")
-        
-        # Step 2: Test sheet open
-        sheet_url = st.secrets["sheet"]["url"]
-        spreadsheet = client.open_by_url(sheet_url)
-        st.write(f"DEBUG 2: Sheet opened: {spreadsheet.title}")
-        
-        # Step 3: Test worksheet access
-        ws = spreadsheet.worksheet("scores")
-        st.write(f"DEBUG 3: Worksheet accessed: {ws.title}")
-        
-        # Step 4: Test read
-        records = ws.get_all_records()
-        st.write(f"DEBUG 4: Records read successfully: {len(records)} rows")
-        
-        # Step 5: Attempt write
+        ws = get_worksheet("scores")
+        records = sheets_operation_with_retry(ws.get_all_records)
         timestamp = datetime.now().isoformat()
+
         for i, r in enumerate(records):
             if int(r["wordle_num"]) == wordle_num and r["player"] == player:
                 row_idx = i + 2
-                st.write(f"DEBUG 5a: Updating existing row {row_idx}")
-                ws.update(
-                    f"A{row_idx}:F{row_idx}",
-                    [[wordle_num, player, strokes, summary, grid, timestamp]]
+                sheets_operation_with_retry(
+                    lambda: ws.update(
+                        f"A{row_idx}:F{row_idx}",
+                        [[wordle_num, player, strokes, summary, grid, timestamp]]
+                    )
                 )
-                st.write("DEBUG 6a: Update complete!")
                 return
 
-        st.write("DEBUG 5b: Appending new row")
-        ws.append_row([wordle_num, player, strokes, summary, grid, timestamp])
-        st.write("DEBUG 6b: Append complete!")
+        sheets_operation_with_retry(
+            lambda: ws.append_row([wordle_num, player, strokes, summary, grid, timestamp])
+        )
 
     except Exception as e:
-        st.error(f"❌ SAVE FAILED at: {e}")
+        st.error(f"❌ Save failed: {e}")
         st.exception(e)
 
 def delete_score(wordle_num, player):
     """Deletes a score entry from the scores tab."""
     try:
         ws = get_worksheet("scores")
-        records = ws.get_all_records()
+        records = sheets_operation_with_retry(ws.get_all_records)
         for i, r in enumerate(records):
             if int(r["wordle_num"]) == wordle_num and r["player"] == player:
-                ws.delete_rows(i + 2)
+                sheets_operation_with_retry(lambda: ws.delete_rows(i + 2))
                 return True
         return False
     except Exception as e:
@@ -322,7 +348,7 @@ def load_history():
     """Loads archived round history from the history tab."""
     try:
         ws = get_worksheet("history")
-        records = ws.get_all_records()
+        records = sheets_operation_with_retry(ws.get_all_records)
         history = []
         for r in records:
             entry = {
@@ -342,13 +368,15 @@ def save_history_entry(round_start, winner, summary, scorecard_dict):
     """Saves a completed round to the history tab."""
     try:
         ws = get_worksheet("history")
-        ws.append_row([
-            round_start,
-            datetime.now().strftime("%Y-%m-%d %H:%M"),
-            winner,
-            summary,
-            json.dumps(scorecard_dict)
-        ])
+        sheets_operation_with_retry(
+            lambda: ws.append_row([
+                round_start,
+                datetime.now().strftime("%Y-%m-%d %H:%M"),
+                winner,
+                summary,
+                json.dumps(scorecard_dict)
+            ])
+        )
     except Exception as e:
         st.error(f"Error saving history: {e}")
 
@@ -356,44 +384,26 @@ def archive_round_scores(round_start):
     """Deletes all scores belonging to a completed round from the scores tab."""
     try:
         ws = get_worksheet("scores")
-        records = ws.get_all_records()
+        records = sheets_operation_with_retry(ws.get_all_records)
         rows_to_delete = []
         for i, r in enumerate(records):
             w_num = int(r["wordle_num"])
             r_start, _ = get_round_start_and_hole(w_num)
             if r_start == round_start:
                 rows_to_delete.append(i + 2)
-        # Delete in reverse to preserve row indices
         for row_idx in sorted(rows_to_delete, reverse=True):
-            ws.delete_rows(row_idx)
+            sheets_operation_with_retry(lambda: ws.delete_rows(row_idx))
     except Exception as e:
         st.error(f"Error archiving round scores: {e}")
 
 # ----------------------------------------------------
-# 4. ROUND LOGIC ENGINE
+# 5. ROUND LOGIC ENGINE
 # ----------------------------------------------------
 def get_round_start_and_hole(wordle_num):
     """
     Determines the round start number and hole number for a given Wordle number.
-
-    Rules:
-    - A round starts at numbers where the last digit is 1
-      AND the second-to-last digit is even.
-    - Each round covers 18 holes (e.g. 1841-1858).
-    - Holes 19-20 (e.g. 1859-1860) are practice/playoff holes.
-    - Numbers like 1861 are BOTH hole 1 of the new round
-      AND potential playoff hole 21 of the previous round.
-
-    Examples:
-    - 1841 -> round 1841, hole 1
-    - 1858 -> round 1841, hole 18
-    - 1859 -> round 1841, hole 19 (practice)
-    - 1860 -> round 1841, hole 20 (practice)
-    - 1861 -> round 1861, hole 1 (AND potential playoff hole 21 of round 1841)
     """
-    # Force integer in case a string key comes in from JSON/Sheets
     wordle_num = int(wordle_num)
-
     for candidate in range(wordle_num, wordle_num - 25, -1):
         c_str = str(candidate)
         last_digit = int(c_str[-1])
@@ -402,7 +412,6 @@ def get_round_start_and_hole(wordle_num):
             round_start = candidate
             hole_num = wordle_num - round_start + 1
             return round_start, hole_num
-
     return wordle_num, 1
 
 def is_practice_hole(hole_num):
@@ -411,8 +420,7 @@ def is_practice_hole(hole_num):
 
 def get_all_rounds_from_scores(scores_dict):
     """
-    Given the full scores dict {wordle_num: {player: data}},
-    returns a sorted list of unique round start numbers.
+    Given the full scores dict, returns a sorted list of unique round start numbers.
     """
     round_starts = set()
     for w_num in scores_dict:
@@ -427,11 +435,10 @@ def get_scores_for_round(scores_dict, round_start):
     """
     Filters scores_dict to only include entries belonging to a specific round.
     Returns {hole_num: {player: data}} for holes 1-20 of that round.
-    Also includes playoff holes from the next round that served as playoffs.
     """
     round_start = int(round_start)
     round_scores = {}
-    round_end = round_start + 19  # holes 1-20
+    round_end = round_start + 19
 
     for w_num_raw, player_data in scores_dict.items():
         try:
@@ -441,13 +448,11 @@ def get_scores_for_round(scores_dict, round_start):
 
         r_start, hole_num = get_round_start_and_hole(w_num)
 
-        # Directly in this round (holes 1-20)
         if r_start == round_start and 1 <= hole_num <= 20:
             if hole_num not in round_scores:
                 round_scores[hole_num] = {}
             round_scores[hole_num].update(player_data)
 
-        # Playoff holes beyond hole 20 (wordle nums past round_end)
         if w_num > round_end and w_num <= round_start + 29:
             playoff_hole = w_num - round_start + 1
             if playoff_hole not in round_scores:
@@ -488,14 +493,11 @@ def parse_wordle_text(text):
 
     return w_num, pattern_data
 
-import requests
-from bs4 import BeautifulSoup
-
 @st.cache_data(ttl=3600)
 def get_wordle_answer(wordle_num):
     """
     Fetches the correct Wordle answer for a given puzzle number.
-    Tries multiple parsing strategies to find the answer.
+    Returns None cleanly if answer cannot be found.
     """
     try:
         url = "https://wordfinder.yourdictionary.com/wordle/answers/"
@@ -510,39 +512,43 @@ def get_wordle_answer(wordle_num):
         soup = BeautifulSoup(response.text, "html.parser")
         full_text = soup.get_text(separator=" ")
 
-        # Strategy 1: #1234: WORD or #1234 - WORD
         pattern1 = rf"#\s*{wordle_num}\s*[:\-–]\s*([A-Za-z]{{5}})"
         match = re.search(pattern1, full_text, re.IGNORECASE)
         if match:
             return match.group(1).upper()
 
-        # Strategy 2: Wordle 1234 WORD
         pattern2 = rf"[Ww]ordle\s*{wordle_num}\s+([A-Za-z]{{5}})"
         match = re.search(pattern2, full_text, re.IGNORECASE)
         if match:
             return match.group(1).upper()
 
-        # Strategy 3: 1234 WORD (just number followed by 5-letter word)
         pattern3 = rf"\b{wordle_num}\b\s+([A-Za-z]{{5}})\b"
         match = re.search(pattern3, full_text, re.IGNORECASE)
         if match:
             return match.group(1).upper()
 
-        # Debug: return a snippet of text around the wordle number
-        # so we can see what format the page uses
-        idx = full_text.find(str(wordle_num))
-        if idx != -1:
-            snippet = full_text[max(0, idx-20):idx+50]
-            return f"DEBUG:{snippet}"
-
         return None
 
-    except Exception as e:
-        return f"ERROR:{e}"
+    except Exception:
+        return None
 
+def safe_answer_display(answer):
+    """
+    Validates a Wordle answer before displaying it.
+    Filters out debug strings, error messages, and invalid values.
+    """
+    if not answer:
+        return None
+    if str(answer).startswith("DEBUG:"):
+        return None
+    if str(answer).startswith("ERROR:"):
+        return None
+    if not re.match(r"^[A-Za-z]{5}$", str(answer)):
+        return None
+    return answer.upper()
 
 # ----------------------------------------------------
-# 5. SESSION STATE INITIALIZATION
+# 6. SESSION STATE INITIALIZATION
 # ----------------------------------------------------
 if "post_msg" not in st.session_state:
     st.session_state.post_msg = ""
@@ -562,31 +568,15 @@ if "clear_paste" not in st.session_state:
     st.session_state.clear_paste = False
 
 # Restore login from device session
-try:
-    from streamlit.web.server.websocket_headers import _get_websocket_headers
-    headers = _get_websocket_headers()
-    browser_token = (
-        f"{headers.get('User-Agent', '')}_{headers.get('X-Forwarded-For', 'local')}"
-    )
-    if (st.session_state.current_user is None
-            and browser_token in st.session_state.device_sessions):
-        st.session_state.current_user = st.session_state.device_sessions[browser_token]
-except Exception:
-    browser_token = "fallback_local_token"
+browser_token = get_browser_token()
+if (st.session_state.current_user is None
+        and browser_token in st.session_state.device_sessions):
+    st.session_state.current_user = st.session_state.device_sessions[browser_token]
 
 # ----------------------------------------------------
-# 6. SIDEBAR: LOGIN
+# 7. SIDEBAR: LOGIN
 # ----------------------------------------------------
 st.sidebar.header("🔐 Pro Tour Player Login")
-
-try:
-    from streamlit.web.server.websocket_headers import _get_websocket_headers
-    headers = _get_websocket_headers()
-    browser_token = (
-        f"{headers.get('User-Agent', '')}_{headers.get('X-Forwarded-For', 'local')}"
-    )
-except Exception:
-    browser_token = "fallback_local_token"
 
 if st.session_state.current_user is None:
     login_name = st.sidebar.selectbox(
@@ -606,9 +596,7 @@ if st.session_state.current_user is None:
             if remember_me:
                 st.session_state.device_sessions[browser_token] = login_name
                 save_session(browser_token, login_name)
-            st.session_state.post_msg = (
-                f"🔓 Welcome back, {login_name}!"
-            )
+            st.session_state.post_msg = f"🔓 Welcome back, {login_name}!"
             st.rerun()
         else:
             st.sidebar.error("Invalid passcode. Please try again.")
@@ -628,40 +616,42 @@ else:
     # PROFILE ADMINISTRATION
     # ----------------------------------------------------
     with st.sidebar.expander("🛠️ Profile Administration"):
-        st.sidebar.write("Register a new competitor profile.")
-        new_player_name = st.sidebar.text_input(
+        st.write("Register a new competitor profile.")
+        new_player_name = st.text_input(
             "Add New Player Name",
             placeholder="e.g., Rory"
         ).strip()
-        new_player_pwd = st.sidebar.text_input(
+        new_player_pwd = st.text_input(
             "Assign Starter Password",
             type="password",
             placeholder="e.g., pass123"
         )
 
-        if st.sidebar.button("➕ Add Player Profile"):
+        if st.button("➕ Add Player Profile"):
             if new_player_name and new_player_pwd:
                 if new_player_name not in st.session_state.player_profiles:
                     st.session_state.player_profiles.append(new_player_name)
                     st.session_state.player_passwords[new_player_name] = new_player_pwd
                     try:
                         ws = get_worksheet("players")
-                        ws.append_row([new_player_name, new_player_pwd])
+                        sheets_operation_with_retry(
+                            lambda: ws.append_row([new_player_name, new_player_pwd])
+                        )
                     except Exception as e:
-                        st.sidebar.error(f"Error saving player: {e}")
+                        st.error(f"Error saving player: {e}")
                     st.session_state.post_msg = f"✅ Created profile for {new_player_name}!"
                     st.rerun()
                 else:
-                    st.sidebar.error("That profile name already exists.")
+                    st.error("That profile name already exists.")
             else:
-                st.sidebar.error("Fill out both fields to create a profile.")
+                st.error("Fill out both fields to create a profile.")
 
     # ----------------------------------------------------
     # SCORECARD CORRECTIONS
     # ----------------------------------------------------
     with st.sidebar.expander("🗑️ Scorecard Corrections"):
-        st.sidebar.write("Delete a score from your card by entering the Wordle number.")
-        target_wordle_num = st.sidebar.number_input(
+        st.write("Delete a score from your card by entering the Wordle number.")
+        target_wordle_num = st.number_input(
             "Wordle # to Delete",
             min_value=1,
             max_value=99999,
@@ -669,7 +659,7 @@ else:
             step=1
         )
 
-        if st.sidebar.button("❌ Delete This Score"):
+        if st.button("❌ Delete This Score"):
             my_name = st.session_state.current_user
             w_num_int = int(target_wordle_num)
             if (w_num_int in st.session_state.scores
@@ -684,7 +674,7 @@ else:
                     )
                     st.rerun()
             else:
-                st.sidebar.error("No score found for that Wordle number on your card.")
+                st.error("No score found for that Wordle number on your card.")
 
     # ----------------------------------------------------
     # SINGLE SCORE SUBMISSION
@@ -747,7 +737,7 @@ else:
     st.sidebar.write("---")
     st.sidebar.header("📂 Bulk Historical Import")
     with st.sidebar.expander("📬 Dump Chat Thread Data Here"):
-        st.sidebar.write(
+        st.write(
             f"Extracts all Wordle results onto "
             f"**{st.session_state.current_user}**'s card."
         )
@@ -776,7 +766,6 @@ else:
                         try:
                             w_num = int(w_num_raw.replace(" ", "").strip())
                             strokes = SCORE_MAP.get(score_char, 0)
-                            _, hole = get_round_start_and_hole(w_num)
 
                             pattern_data = {
                                 "strokes": strokes,
@@ -799,30 +788,24 @@ else:
                         )
                         st.rerun()
                     else:
+                    else:
                         st.sidebar.error("No scores could be extracted.")
 
-            
 # ----------------------------------------------------
-# 7. POST MESSAGE DISPLAY
+# 8. POST MESSAGE DISPLAY
 # ----------------------------------------------------
 if st.session_state.post_msg:
     st.success(st.session_state.post_msg)
     st.session_state.post_msg = ""
 
 # ----------------------------------------------------
-# 8. DETERMINE ACTIVE ROUND
+# 9. DETERMINE ACTIVE ROUND
 # ----------------------------------------------------
-
-# Define players list first
-PLAYERS = ["Dan", "Rik"]
-
-# Define function before calling it
 def get_active_round(scores_dict, players):
     """
     Returns the most recent round start where both players
     have at least one score entry.
     """
-    # Ensure all keys are integers before processing
     clean_scores = {}
     for k, v in scores_dict.items():
         try:
@@ -840,7 +823,6 @@ def get_active_round(scores_dict, players):
         if all(p in players_in_round for p in players):
             return round_start
 
-    # If no shared round, return most recent round with any scores
     if all_rounds:
         return all_rounds[-1]
     return None
@@ -853,13 +835,11 @@ for k, v in st.session_state.scores.items():
     except (ValueError, TypeError):
         continue
 
-# Now safe to call both
 all_round_starts = get_all_rounds_from_scores(all_scores)
 active_round_start = get_active_round(all_scores, PLAYERS)
 
-
 # ----------------------------------------------------
-# 9. MAIN SCOREBOARD
+# 10. MAIN SCOREBOARD
 # ----------------------------------------------------
 st.header("🏆 Live Standings")
 
@@ -917,7 +897,7 @@ else:
                 break
 
     # ----------------------------------------------------
-    # 10. CHAMPIONSHIP RESOLUTIONS
+    # 11. CHAMPIONSHIP RESOLUTIONS
     # ----------------------------------------------------
     round_ended = False
     winner_name = None
@@ -956,7 +936,7 @@ else:
             st.success(f"🏆 **Put on the green jacket, {winner_name}!**")
 
     # ----------------------------------------------------
-    # 11. STANDINGS CARDS
+    # 12. STANDINGS CARDS
     # ----------------------------------------------------
     col1, col2 = st.columns(2)
 
@@ -995,19 +975,20 @@ else:
         )
 
     # ----------------------------------------------------
-    # 12. SCORECARD TABLE
+    # 13. SCORECARD TABLE
     # ----------------------------------------------------
     st.subheader("📊 Tournament Scoreboard")
     st.caption("💡 Hover over any score to see the color grid!")
 
-    # Split holes into front 9, back 9 and playoffs
     front_9_holes = list(range(1, 10))
     back_9_holes = list(range(10, 19))
+
+    # FIXED: was > 20, now > 18 to correctly capture all playoff holes
     playoff_holes_display = []
     if playoff_active or playoff_winner:
         playoff_holes_display = sorted([
             h for h in round_scores.keys()
-            if h > 20
+            if h > 18
         ])
 
     display_holes = front_9_holes + back_9_holes + playoff_holes_display
@@ -1033,7 +1014,6 @@ else:
                 cell_html = "<span style='color: #64748b;'>⏳</span>"
             else:
                 strokes = res["strokes"] if isinstance(res, dict) else int(res)
-                summary = res.get("summary", "") if isinstance(res, dict) else ""
                 raw_grid = res.get("grid", "") if isinstance(res, dict) else ""
                 clean_grid = (
                     str(raw_grid)
@@ -1053,7 +1033,8 @@ else:
                 # Only show answer if both players have submitted
                 if both_have:
                     wordle_num_for_hole = active_round_start + h - 1
-                    answer = get_wordle_answer(wordle_num_for_hole)
+                    raw_answer = get_wordle_answer(wordle_num_for_hole)
+                    answer = safe_answer_display(raw_answer)
                     answer_line = (
                         f"<b style='color:#22c55e; font-size:15px; "
                         f"letter-spacing:3px;'>🟩 {answer} 🟩</b><br><br>"
@@ -1074,7 +1055,6 @@ else:
                     "</span></div>"
                 )
 
-
             scorecard_data[player]["holes_html"][h] = cell_html
 
     total_synced = scorecard_data[p1]["synced_count"]
@@ -1092,13 +1072,9 @@ else:
                 "<th style='background-color: #1e293b;'>F (1-9)</th>"
             )
         elif title == "Back 9":
-            tbl += (
-                "<th style='background-color: #1e293b;'>B (10-18)</th>"
-            )
+            tbl += "<th style='background-color: #1e293b;'>B (10-18)</th>"
         elif title == "⚡ Playoffs":
-            tbl += (
-                "<th style='background-color: #ef4444; color:white;'>Playoff</th>"
-            )
+            tbl += "<th style='background-color: #ef4444; color:white;'>Playoff</th>"
 
         for h in holes:
             lbl = str(h)
@@ -1158,11 +1134,10 @@ else:
         )
 
     # ----------------------------------------------------
-    # 13. ARCHIVE BUTTON
+    # 14. ARCHIVE BUTTON
     # ----------------------------------------------------
     if round_ended and st.session_state.current_user is not None:
         if st.button("📦 Archive This Round & Start Fresh"):
-            # Build scorecard snapshot for history
             scorecard_snapshot = {}
             for h in display_holes:
                 h_data = round_scores.get(h, {})
@@ -1180,14 +1155,13 @@ else:
             )
             archive_round_scores(active_round_start)
 
-            # Reload scores from sheet
             st.session_state.scores = load_all_scores()
             st.session_state.history = load_history()
             st.session_state.post_msg = "📦 Round archived successfully!"
             st.rerun()
 
 # ----------------------------------------------------
-# 14. BROADCAST COMMENTARY BOOTH
+# 15. BROADCAST COMMENTARY BOOTH
 # ----------------------------------------------------
 st.write("---")
 st.header("🎙️ Live Broadcast Booth")
@@ -1222,7 +1196,7 @@ if active_round_start is not None:
         )
 
 # ----------------------------------------------------
-# 15. HISTORICAL ARCHIVE
+# 16. HISTORICAL ARCHIVE
 # ----------------------------------------------------
 st.write("---")
 st.header("📜 Historical Tournament Records")
@@ -1243,10 +1217,9 @@ else:
             if not scorecard:
                 st.caption("No scorecard data available.")
             else:
-                # Build historical scorecard table
                 hist_holes = sorted([int(h) for h in scorecard.keys()])
                 hist_display = [h for h in hist_holes if h <= 18]
-                hist_playoff = [h for h in hist_holes if h > 20]
+                hist_playoff = [h for h in hist_holes if h > 18]
                 hist_display += hist_playoff
 
                 hist_table = "<table><thead><tr>"
@@ -1272,7 +1245,6 @@ else:
                             cells[h] = "<span style='color:#64748b'>—</span>"
                         else:
                             strokes = res["strokes"] if isinstance(res, dict) else int(res)
-                            summary = res.get("summary", "") if isinstance(res, dict) else ""
                             raw_grid = res.get("grid", "") if isinstance(res, dict) else ""
                             clean_grid = (
                                 str(raw_grid)
@@ -1288,7 +1260,8 @@ else:
                                     back += strokes
 
                             wordle_num_for_hole = round_start + h - 1
-                            answer = get_wordle_answer(wordle_num_for_hole)
+                            raw_answer = get_wordle_answer(wordle_num_for_hole)
+                            answer = safe_answer_display(raw_answer)
                             answer_line = (
                                 f"<b style='color:#22c55e; font-size:15px; "
                                 f"letter-spacing:3px;'>🟩 {answer} 🟩</b><br><br>"
