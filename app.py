@@ -475,11 +475,11 @@ def parse_wordle_text(text):
 import requests
 from bs4 import BeautifulSoup
 
-@st.cache_data(ttl=3600)  # Cache for 1 hour
+@st.cache_data(ttl=3600)
 def get_wordle_answer(wordle_num):
     """
-    Fetches the correct Wordle answer for a given puzzle number
-    from yourdictionary.com. Cached for 1 hour.
+    Fetches the correct Wordle answer for a given puzzle number.
+    Tries multiple parsing strategies to find the answer.
     """
     try:
         url = "https://wordfinder.yourdictionary.com/wordle/answers/"
@@ -492,17 +492,37 @@ def get_wordle_answer(wordle_num):
         }
         response = requests.get(url, headers=headers, timeout=10)
         soup = BeautifulSoup(response.text, "html.parser")
+        full_text = soup.get_text(separator=" ")
 
-        # Find all answer entries on the page
-        # The page lists entries like "Wordle #1234: WORD"
-        text = soup.get_text()
-        pattern = rf"(?i)#\s*{wordle_num}\s*[:\-–]\s*([A-Za-z]{{5}})"
-        match = re.search(pattern, text)
+        # Strategy 1: #1234: WORD or #1234 - WORD
+        pattern1 = rf"#\s*{wordle_num}\s*[:\-–]\s*([A-Za-z]{{5}})"
+        match = re.search(pattern1, full_text, re.IGNORECASE)
         if match:
             return match.group(1).upper()
+
+        # Strategy 2: Wordle 1234 WORD
+        pattern2 = rf"[Ww]ordle\s*{wordle_num}\s+([A-Za-z]{{5}})"
+        match = re.search(pattern2, full_text, re.IGNORECASE)
+        if match:
+            return match.group(1).upper()
+
+        # Strategy 3: 1234 WORD (just number followed by 5-letter word)
+        pattern3 = rf"\b{wordle_num}\b\s+([A-Za-z]{{5}})\b"
+        match = re.search(pattern3, full_text, re.IGNORECASE)
+        if match:
+            return match.group(1).upper()
+
+        # Debug: return a snippet of text around the wordle number
+        # so we can see what format the page uses
+        idx = full_text.find(str(wordle_num))
+        if idx != -1:
+            snippet = full_text[max(0, idx-20):idx+50]
+            return f"DEBUG:{snippet}"
+
         return None
-    except Exception:
-        return None
+
+    except Exception as e:
+        return f"ERROR:{e}"
 
 
 # ----------------------------------------------------
