@@ -628,18 +628,18 @@ else:
     # PROFILE ADMINISTRATION
     # ----------------------------------------------------
     with st.sidebar.expander("🛠️ Profile Administration"):
-        st.write("Register a new competitor profile.")
-        new_player_name = st.text_input(
+        st.sidebar.write("Register a new competitor profile.")
+        new_player_name = st.sidebar.text_input(
             "Add New Player Name",
             placeholder="e.g., Rory"
         ).strip()
-        new_player_pwd = st.text_input(
+        new_player_pwd = st.sidebar.text_input(
             "Assign Starter Password",
             type="password",
             placeholder="e.g., pass123"
         )
 
-        if st.button("➕ Add Player Profile"):
+        if st.sidebar.button("➕ Add Player Profile"):
             if new_player_name and new_player_pwd:
                 if new_player_name not in st.session_state.player_profiles:
                     st.session_state.player_profiles.append(new_player_name)
@@ -648,20 +648,20 @@ else:
                         ws = get_worksheet("players")
                         ws.append_row([new_player_name, new_player_pwd])
                     except Exception as e:
-                        st.error(f"Error saving player: {e}")
+                        st.sidebar.error(f"Error saving player: {e}")
                     st.session_state.post_msg = f"✅ Created profile for {new_player_name}!"
                     st.rerun()
                 else:
-                    st.error("That profile name already exists.")
+                    st.sidebar.error("That profile name already exists.")
             else:
-                st.error("Fill out both fields to create a profile.")
+                st.sidebar.error("Fill out both fields to create a profile.")
 
     # ----------------------------------------------------
     # SCORECARD CORRECTIONS
     # ----------------------------------------------------
     with st.sidebar.expander("🗑️ Scorecard Corrections"):
-        st.write("Delete a score from your card by entering the Wordle number.")
-        target_wordle_num = st.number_input(
+        st.sidebar.write("Delete a score from your card by entering the Wordle number.")
+        target_wordle_num = st.sidebar.number_input(
             "Wordle # to Delete",
             min_value=1,
             max_value=99999,
@@ -669,7 +669,7 @@ else:
             step=1
         )
 
-        if st.button("❌ Delete This Score"):
+        if st.sidebar.button("❌ Delete This Score"):
             my_name = st.session_state.current_user
             w_num_int = int(target_wordle_num)
             if (w_num_int in st.session_state.scores
@@ -684,7 +684,7 @@ else:
                     )
                     st.rerun()
             else:
-                st.error("No score found for that Wordle number on your card.")
+                st.sidebar.error("No score found for that Wordle number on your card.")
 
     # ----------------------------------------------------
     # SINGLE SCORE SUBMISSION
@@ -701,16 +701,12 @@ else:
     )
 
     if st.sidebar.button("🚀 Post Score to Database"):
-        st.write("DEBUG A: Button clicked")
         if not wordle_paste:
             st.sidebar.error("Please paste your Wordle snippet first!")
         else:
-            st.write("DEBUG B: Paste detected")
             w_num, pattern_data = parse_wordle_text(wordle_paste)
-            st.write(f"DEBUG C: Parsed w_num={w_num}, pattern_data={pattern_data}")
             if w_num is not None:
                 my_name = st.session_state.current_user
-                st.write(f"DEBUG D: Player={my_name}")
                 is_update = (
                     w_num in st.session_state.scores
                     and my_name in st.session_state.scores[w_num]
@@ -720,7 +716,6 @@ else:
                     st.session_state.scores[w_num] = {}
                 st.session_state.scores[w_num][my_name] = pattern_data
 
-                st.write("DEBUG E: About to call save_score")
                 save_score(
                     w_num,
                     my_name,
@@ -728,7 +723,6 @@ else:
                     pattern_data["summary"],
                     pattern_data["grid"]
                 )
-                st.write("DEBUG F: save_score returned")
 
                 _, hole = get_round_start_and_hole(w_num)
                 shoutout = SCORE_NAMES.get(pattern_data["strokes"], "Score logged")
@@ -746,25 +740,26 @@ else:
                 st.rerun()
             else:
                 st.sidebar.error("Could not parse Wordle text. Check your snippet!")
+
     # ----------------------------------------------------
     # BULK HISTORICAL IMPORT
     # ----------------------------------------------------
     st.sidebar.write("---")
     st.sidebar.header("📂 Bulk Historical Import")
     with st.sidebar.expander("📬 Dump Chat Thread Data Here"):
-        st.write(
+        st.sidebar.write(
             f"Extracts all Wordle results onto "
             f"**{st.session_state.current_user}**'s card."
         )
-        bulk_text = st.text_area(
+        bulk_text = st.sidebar.text_area(
             "Paste Chat Text Content",
             placeholder="Wordle 1,816 3/6*...",
             height=150
         )
 
-        if st.button("⚡ Parse & Save All"):
+        if st.sidebar.button("⚡ Parse & Save All"):
             if not bulk_text:
-                st.error("Paste text before compiling!")
+                st.sidebar.error("Paste text before compiling!")
             else:
                 my_name = st.session_state.current_user
                 clean_bulk = bulk_text.replace(",", "")
@@ -774,7 +769,7 @@ else:
                 )
 
                 if not matches:
-                    st.error("No valid Wordle blocks found in that text.")
+                    st.sidebar.error("No valid Wordle blocks found in that text.")
                 else:
                     success_count = 0
                     for w_num_raw, score_char in matches:
@@ -804,7 +799,9 @@ else:
                         )
                         st.rerun()
                     else:
-                        st.error("No scores could be extracted.")
+                        st.sidebar.error("No scores could be extracted.")
+
+            
 # ----------------------------------------------------
 # 7. POST MESSAGE DISPLAY
 # ----------------------------------------------------
