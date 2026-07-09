@@ -1011,12 +1011,30 @@ else:
                     elif 10 <= h <= 18:
                         scorecard_data[player]["back_9"] += strokes
 
+                # Only show answer if both players have submitted
+                if both_have:
+                    wordle_num_for_hole = active_round_start + h - 1
+                    answer = get_wordle_answer(wordle_num_for_hole)
+                    answer_line = (
+                        f"<b style='color:#22c55e; font-size:15px; "
+                        f"letter-spacing:3px;'>🟩 {answer} 🟩</b><br><br>"
+                        if answer else ""
+                    )
+                else:
+                    answer_line = (
+                        "<i style='color:#94a3b8;'>Answer revealed when "
+                        "both players submit</i><br><br>"
+                    )
+
                 cell_html = (
-                    f'<div class="wordle-tooltip">{strokes:+}'
-                    f'<span class="wordle-tooltiptext">'
-                    f'<b>Hole {h}:</b><br>{summary}<br><br>{clean_grid}'
-                    f'</span></div>'
+                    '<div class="wordle-tooltip">' + f"{strokes:+}" +
+                    '<span class="wordle-tooltiptext">'
+                    "<b>Hole " + str(h) + ":</b><br><br>" +
+                    answer_line +
+                    clean_grid +
+                    "</span></div>"
                 )
+
 
             scorecard_data[player]["holes_html"][h] = cell_html
 
@@ -1230,11 +1248,20 @@ else:
                                 elif 10 <= h <= 18:
                                     back += strokes
 
+                            wordle_num_for_hole = round_start + h - 1
+                            answer = get_wordle_answer(wordle_num_for_hole)
+                            answer_line = (
+                                f"<b style='color:#22c55e; font-size:15px; "
+                                f"letter-spacing:3px;'>🟩 {answer} 🟩</b><br><br>"
+                                if answer else ""
+                            )
                             cells[h] = (
-                                f'<div class="wordle-tooltip">{strokes:+}'
-                                f'<span class="wordle-tooltiptext">'
-                                f'<b>Hole {h}:</b><br>{summary}<br><br>{clean_grid}'
-                                f'</span></div>'
+                                '<div class="wordle-tooltip">' + f"{strokes:+}" +
+                                '<span class="wordle-tooltiptext">'
+                                "<b>Hole " + str(h) + ":</b><br><br>" +
+                                answer_line +
+                                clean_grid +
+                                "</span></div>"
                             )
 
                     tot_str = f"{total:+}" if total != 0 else "E"
