@@ -578,7 +578,7 @@ else:
             w_num_int = int(target_wordle_num)
             if (w_num_int in st.session_state.scores
                     and my_name in st.session_state.scores[w_num_int]):
-                del st.session_state.scores[w_num_int][my_name]a
+                del st.session_state.scores[w_num_int][my_name]
                 if not st.session_state.scores[w_num_int]:
                     del st.session_state.scores[w_num_int]
                 deleted = delete_score(w_num_int, my_name)
