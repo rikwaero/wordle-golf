@@ -768,7 +768,7 @@ else:
             reg_totals[p2] += s2
 
     regulation_finished = len(reg_completed_holes)
-        regulation_complete = regulation_finished == 18
+    regulation_complete = regulation_finished == 18
 
     # Playoff sudden death logic
     playoff_active = False
