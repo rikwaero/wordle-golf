@@ -162,7 +162,7 @@ SCORE_NAMES = {
 # ----------------------------------------------------
 @st.cache_resource
 def get_gsheet_client():
-    """Creates and caches the Google Sheets client."""
+    """Creates a fresh Google Sheets client every time."""
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive"
@@ -173,9 +173,8 @@ def get_gsheet_client():
     )
     return gspread.authorize(credentials)
 
-@st.cache_resource
 def get_sheet():
-    """Opens and caches the Google Sheet."""
+    """Opens a fresh Google Sheet connection every time."""
     client = get_gsheet_client()
     sheet_url = st.secrets["sheet"]["url"]
     return client.open_by_url(sheet_url)
