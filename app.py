@@ -788,7 +788,6 @@ else:
                         )
                         st.rerun()
                     else:
-                    else:
                         st.sidebar.error("No scores could be extracted.")
 
 # ----------------------------------------------------
