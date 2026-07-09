@@ -997,24 +997,25 @@ else:
 
         if title == "Front 9":
             tbl += (
-                f"<th style='background-color: #d97706; color: white;'>"
+                "<th style='background-color: #d97706; color: white;'>"
                 f"Total ({total_synced})</th>"
-                f"<th style='background-color: #1e293b;'>F (1-9)</th>"
+                "<th style='background-color: #1e293b;'>F (1-9)</th>"
             )
         elif title == "Back 9":
             tbl += (
-                f"<th style='background-color: #1e293b;'>B (10-18)</th>"
+                "<th style='background-color: #1e293b;'>B (10-18)</th>"
             )
         elif title == "⚡ Playoffs":
             tbl += (
-                f"<th style='background-color: #ef4444; color:white;'>Playoff</th>"
+                "<th style='background-color: #ef4444; color:white;'>Playoff</th>"
             )
 
         for h in holes:
             lbl = str(h)
             if h > 18:
                 lbl += "🚨"
-            tbl += f"<th
+            tbl += "<th>" + lbl + "</th>"
+        tbl += "</tr></thead><tbody>"
             
     # ----------------------------------------------------
     # 13. ARCHIVE BUTTON
