@@ -632,60 +632,7 @@ else:
             else:
                 st.error("No score found for that Wordle number on your card.")
 
-    # ----------------------------------------------------
-    # SINGLE SCORE SUBMISSION
-    # ----------------------------------------------------
-    st.sidebar.write("---")
-    st.sidebar.header("🎯 Individual Entry")
 
-    paste_key = "wordle_paste_input_clear" if st.session_state.clear_paste else "wordle_paste_input"
-    wordle_paste = st.sidebar.text_area(
-        "Paste Single Wordle Snippet",
-        placeholder="Wordle 1,845 4/6*...",
-        height=90,
-        key=paste_key
-    )
-
-    if st.sidebar.button("🚀 Post Score to Database"):
-        if not wordle_paste:
-            st.sidebar.error("Please paste your Wordle snippet first!")
-        else:
-            w_num, pattern_data = parse_wordle_text(wordle_paste)
-            if w_num is not None:
-                my_name = st.session_state.current_user
-                is_update = (
-                    w_num in st.session_state.scores
-                    and my_name in st.session_state.scores[w_num]
-                )
-
-                if w_num not in st.session_state.scores:
-                    st.session_state.scores[w_num] = {}
-                st.session_state.scores[w_num][my_name] = pattern_data
-
-                save_score(
-                    w_num,
-                    my_name,
-                    pattern_data["strokes"],
-                    pattern_data["summary"],
-                    pattern_data["grid"]
-                )
-
-                _, hole = get_round_start_and_hole(w_num)
-                shoutout = SCORE_NAMES.get(pattern_data["strokes"], "Score logged")
-
-                if is_update:
-                    st.session_state.post_msg = (
-                        f"🔄 Updated Wordle #{w_num} (Hole {hole}): {shoutout}"
-                    )
-                else:
-                    st.session_state.post_msg = (
-                        f"✅ Logged Wordle #{w_num} (Hole {hole}): {shoutout}"
-                    )
-
-                st.session_state.clear_paste = not st.session_state.clear_paste
-                st.rerun()
-            else:
-                st.sidebar.error("Could not parse Wordle text. Check your snippet!")
 
     # ----------------------------------------------------
     # BULK HISTORICAL IMPORT
@@ -753,6 +700,177 @@ if st.session_state.post_msg:
     st.success(st.session_state.post_msg)
     st.session_state.post_msg = ""
 
+# ----------------------------------------------------
+# 8b. SCORE ENTRY (MAIN PAGE)
+# ----------------------------------------------------
+st.write("---")
+st.header("🎯 Post Your Score")
+
+if st.session_state.current_user is None:
+    st.info("🔐 Log in using the sidebar to post your score!")
+else:
+    st.markdown(f"Posting as: **{st.session_state.current_user}**")
+
+    tab1, tab2 = st.tabs(["📋 Paste Full Result", "✏️ Manual Entry"])
+
+    with tab1:
+        st.write("**Paste your full Wordle share text below**")
+        st.caption("📱 Mobile: Tap the box below, then long-press inside to paste")
+
+        paste_key = (
+            "wordle_paste_main_clear"
+            if st.session_state.clear_paste
+            else "wordle_paste_main"
+        )
+        wordle_paste = st.text_area(
+            "Wordle Result",
+            placeholder="Wordle 1,845 4/6*\n\n⬛🟨⬛⬛⬛\n🟨⬛⬛🟩⬛\n🟩🟩🟩🟩🟩",
+            height=200,
+            key=paste_key,
+            label_visibility="collapsed"
+        )
+
+        if st.button("🚀 Post Score", use_container_width=True):
+            if not wordle_paste:
+                st.error("Please paste your Wordle snippet first!")
+            else:
+                w_num, pattern_data = parse_wordle_text(wordle_paste)
+                if w_num is not None:
+                    my_name = st.session_state.current_user
+                    is_update = (
+                        w_num in st.session_state.scores
+                        and my_name in st.session_state.scores[w_num]
+                    )
+
+                    if w_num not in st.session_state.scores:
+                        st.session_state.scores[w_num] = {}
+                    st.session_state.scores[w_num][my_name] = pattern_data
+
+                    save_score(
+                        w_num,
+                        my_name,
+                        pattern_data["strokes"],
+                        pattern_data["summary"],
+                        pattern_data["grid"]
+                    )
+
+                    _, hole = get_round_start_and_hole(w_num)
+                    shoutout = SCORE_NAMES.get(pattern_data["strokes"], "Score logged")
+
+                    if is_update:
+                        st.session_state.post_msg = (
+                            f"🔄 Updated Wordle #{w_num} (Hole {hole}): {shoutout}"
+                        )
+                    else:
+                        st.session_state.post_msg = (
+                            f"✅ Logged Wordle #{w_num} (Hole {hole}): {shoutout}"
+                        )
+
+                    st.session_state.clear_paste = not st.session_state.clear_paste
+                    st.rerun()
+                else:
+                    st.error("Could not parse Wordle text. Check your snippet!")
+
+    with tab2:
+        st.write("**Enter your result manually**")
+
+        col1, col2 = st.columns(2)
+        with col1:
+            manual_wordle_num = st.number_input(
+                "Wordle Number",
+                min_value=1,
+                max_value=99999,
+                value=1841,
+                step=1
+            )
+        with col2:
+            manual_score = st.selectbox(
+                "Guesses",
+                options=["1", "2", "3", "4", "5", "6", "X"],
+                index=3,
+                format_func=lambda x: {
+                    "1": "1 🚀 Hole in One!",
+                    "2": "2 🦅 Eagle",
+                    "3": "3 🐦 Birdie",
+                    "4": "4 ⛳ Par",
+                    "5": "5 ⚠️ Bogey",
+                    "6": "6 ❌ Double Bogey",
+                    "X": "X 💥 Failed"
+                }[x]
+            )
+
+        st.caption("📱 Paste just the emoji grid below (optional but recommended)")
+        st.caption("In Wordle: Share → Copy → paste ONLY the coloured squares here")
+
+        grid_key = (
+            "grid_main_clear"
+            if st.session_state.clear_paste
+            else "grid_main"
+        )
+        manual_grid = st.text_area(
+            "Emoji Grid",
+            placeholder="⬛🟨⬛⬛⬛\n🟨⬛⬛🟩⬛\n🟩🟩🟩🟩🟩",
+            height=150,
+            key=grid_key
+        )
+
+        if st.button(
+            "🚀 Post Score",
+            use_container_width=True,
+            key="post_manual_main"
+        ):
+            my_name = st.session_state.current_user
+            w_num = int(manual_wordle_num)
+            strokes = SCORE_MAP.get(manual_score, 0)
+
+            # Parse grid if provided
+            grid_lines = []
+            if manual_grid:
+                for line in manual_grid.split("\n"):
+                    if any(emoji in line for emoji in ["🟩", "🟨", "⬛", "⬜"]):
+                        grid_lines.append(line.strip())
+            grid_visual = "\n".join(grid_lines)
+
+            # Build summary from grid if available
+            if grid_visual:
+                greens = manual_grid.count("🟩")
+                yellows = manual_grid.count("🟨")
+                misses = manual_grid.count("⬛") + manual_grid.count("⬜")
+                summary = f"🟩 {greens} | 🟨 {yellows} | 🟥 {misses}"
+            else:
+                summary = f"Manual entry: {manual_score}/6"
+
+            is_update = (
+                w_num in st.session_state.scores
+                and my_name in st.session_state.scores[w_num]
+            )
+
+            pattern_data = {
+                "strokes": strokes,
+                "summary": summary,
+                "grid": grid_visual
+            }
+
+            if w_num not in st.session_state.scores:
+                st.session_state.scores[w_num] = {}
+            st.session_state.scores[w_num][my_name] = pattern_data
+
+            save_score(w_num, my_name, strokes, summary, grid_visual)
+
+            _, hole = get_round_start_and_hole(w_num)
+            shoutout = SCORE_NAMES.get(strokes, "Score logged")
+
+            if is_update:
+                st.session_state.post_msg = (
+                    f"🔄 Updated Wordle #{w_num} (Hole {hole}): {shoutout}"
+                )
+            else:
+                st.session_state.post_msg = (
+                    f"✅ Logged Wordle #{w_num} (Hole {hole}): {shoutout}"
+                )
+
+            st.session_state.clear_paste = not st.session_state.clear_paste
+            st.rerun()
 # ----------------------------------------------------
 # 9. DETERMINE ACTIVE ROUND
 # ----------------------------------------------------
