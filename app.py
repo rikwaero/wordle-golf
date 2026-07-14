@@ -137,6 +137,21 @@ st.markdown("""
             left: 0% !important;
             margin-left: -70px !important;
         }
+    }    
+    /* Running total sub-row styling */
+    tr.running-row td {
+        font-size: 12px;
+        font-style: normal;
+        color: #94a3b8;
+        background-color: #0a0f1a;
+        border-top: 1px dashed #1e293b;
+        padding: 4px 12px !important;
+    }
+    tr.running-row td:first-child {
+        color: #475569;
+        font-size: 11px;
+        font-style: italic;
+        background-color: #0a0f1a;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -1241,10 +1256,7 @@ else:
             tbl += "</tr>"
 
             # ---- Row 2: running cumulative total ----
-            tbl += (
-                "<tr style='background-color: #0a0f1a; "
-                "border-top: none;'>"
-            )
+            tbl += "<tr class='running-row'>"
             # Label cell for the running row
             tbl += (
                 "<td style='color:#64748b; font-size:10px; "
@@ -1547,9 +1559,7 @@ else:
                     hist_table += "</tr>"
 
                     # Row 2: running totals
-                    hist_table += (
-                        "<tr style='background-color:#0a0f1a;'>"
-                    )
+                    hist_table += "<tr class='running-row'>"
                     hist_table += (
                         "<td style='color:#64748b; font-size:10px; "
                         "font-style:italic; border-top:none;'>Thru</td>"
