@@ -1308,11 +1308,18 @@ else:
         out += "<thead><tr>"
         out += "<th>Player</th>"
         if is_front:
-            out += (
-                "<th style='background:#b45309; color:#fff;'>"
-                f"Total ({total_synced}/18)</th>"
-                "<th>F 1–9</th>"
-            )
+                total_val = tot['total']
+                if total_val < 0:
+                    total_bg = "background:rgba(22,163,74,0.2);"
+                elif total_val > 0:
+                    total_bg = "background:rgba(220,38,38,0.2);"
+                else:
+                    total_bg = "background:rgba(180,83,9,0.2);"
+                out += (
+                    f"<td style='{total_bg} font-weight:700;'>"
+                    f"{fmt_total(tot['total'])}</td>"
+                    f"<td>{fmt_total(tot['front_9'])}</td>"
+                )
         elif is_back:
             out += "<th>B 10–18</th>"
         elif is_playoff:
@@ -1325,7 +1332,8 @@ else:
 
         # ── Player rows ──
         out += "<tbody>"
-        for player in PLAYERS:
+        sorted_players = sorted(PLAYERS, key=lambda p: scorecard_totals[p]["total"])
+        for player in sorted_players:
             tot   = scorecard_totals[player]
 
             # Score row
@@ -1333,10 +1341,16 @@ else:
             out += f"<td><b>{player}</b></td>"
 
             if is_front:
+                if run_f9 < 0:
+                    thru_bg = "background:rgba(22,163,74,0.1);"
+                elif run_f9 > 0:
+                    thru_bg = "background:rgba(220,38,38,0.1);"
+                else:
+                    thru_bg = "background:rgba(180,83,9,0.1);"
                 out += (
-                    f"<td style='background:rgba(180,83,9,0.2); font-weight:700;'>"
-                    f"{fmt_total(tot['total'])}</td>"
-                    f"<td>{fmt_total(tot['front_9'])}</td>"
+                    f"<td style='{thru_bg}'>"
+                    f"{run_span(run_f9)}</td>"
+                    "<td></td>"
                 )
             elif is_back:
                 out += f"<td>{fmt_total(tot['back_9'])}</td>"
@@ -1682,8 +1696,8 @@ else:
                     ht += f"<th>{h}{'🚨' if h > 18 else ''}</th>"
                 ht += "</tr></thead><tbody>"
 
-                for player in PLAYERS:
-                    t = h_tots[player]
+                sorted_players = sorted(PLAYERS, key=lambda p: h_tots[p]["total"])
+                for player in sorted_players:
 
                     # Score row
                     ht += f"<tr class='score-row'><td><b>{player}</b></td>"
