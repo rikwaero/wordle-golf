@@ -92,10 +92,14 @@ st.markdown("""
 }
 
 /* ── Scorecard table ── */
+.scorecard-outer {
+    overflow: visible;
+    position: relative;
+    margin-top: 15px;
+}
 .scorecard-wrap {
     overflow-x: auto;
-    overflow-y: visible;
-    margin-top: 15px;
+    margin-bottom: 0;
     border-radius: 10px;
     box-shadow: 0 2px 8px rgba(0,0,0,0.15);
 }
@@ -1260,7 +1264,7 @@ else:
         is_playoff  = title == "⚡ Playoffs"
 
         out = f"<p class='section-label'>{title}</p>"
-        out += "<div class='scorecard-wrap'><table>"
+        out += "<div class='scorecard-outer'><div class='scorecard-wrap'><table>"
 
         # ── Header row ──
         out += "<thead><tr>"
@@ -1331,7 +1335,7 @@ else:
                 out += f"<td>{thru_cells[player].get(h, run_span(0,blank=True))}</td>"
             out += "</tr>"
 
-        out += "</tbody></table></div>"
+        out += "</tbody></table></div></div>"
         return out
 
     # ── Render ────────────────────────────────────────────
