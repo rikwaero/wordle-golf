@@ -1396,7 +1396,7 @@ if active_round_start is not None:
             unsafe_allow_html=True
         )
 
-            with st.expander(label):
+        with st.expander(label):
                 scorecard = entry.get("scorecard", {})
                 if not scorecard:
                     st.caption("No scorecard data available.")
