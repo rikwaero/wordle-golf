@@ -785,24 +785,10 @@ else:
                 def normalise_name(raw):
                     return NAME_ALIASES.get(raw.strip().lower(), None)
 
-                my_name       = st.session_state.current_user
-                success_count = 0
-                skipped_count = 0
-
-                # ── Pre-process: strip commas, normalise whitespace ──
-                clean_bulk = bulk_text.replace(",", "")
-                lines      = clean_bulk.split("\n")
-
-                # ── State machine: track current author ──────
-                current_author = my_name
-                pending_grid_lines = []
-                pending_entry      = None  # (w_num, strokes, author)
-
-                def flush_pending():
-                    """Save the pending entry with its accumulated grid."""
-                    nonlocal pending_entry, pending_grid_lines, success_count
+                def save_pending(pending_entry, pending_grid_lines):
+                    """Save one pending entry with its accumulated grid."""
                     if pending_entry is None:
-                        return
+                        return 0
                     w_num, strokes, author = pending_entry
                     grid_visual = "\n".join(pending_grid_lines)
 
@@ -824,10 +810,16 @@ else:
                         st.session_state.scores[w_num] = {}
                     st.session_state.scores[w_num][author] = pattern_data
                     save_score(w_num, author, strokes, summary, grid_visual)
-                    success_count += 1
+                    return 1
 
-                    pending_entry      = None
-                    pending_grid_lines = []
+                my_name            = st.session_state.current_user
+                success_count      = 0
+                current_author     = my_name
+                pending_entry      = None
+                pending_grid_lines = []
+
+                clean_bulk = bulk_text.replace(",", "")
+                lines      = clean_bulk.split("\n")
 
                 for line in lines:
                     stripped = line.strip()
@@ -835,7 +827,6 @@ else:
                         continue
 
                     # ── Skip date/archive header lines ──────
-                    # Matches: "Archive June 12, 2026" or "1 Jul 2026, 19:10"
                     if re.match(
                         r"^(Archive\s+)?"
                         r"(\d{1,2}\s+\w+\s+\d{4}|\w+\s+\d{1,2},?\s+\d{4})"
@@ -845,7 +836,6 @@ else:
                         continue
 
                     # ── Detect standalone player name line ──
-                    # e.g. "Dan" or "Rikard Wærø" on its own line
                     name_only = re.match(
                         r"^([A-Za-zÀ-ÖØ-öø-ÿ]+(?:\s[A-Za-zÀ-ÖØ-öø-ÿ]+)*)$",
                         stripped
@@ -857,7 +847,6 @@ else:
                             continue
 
                     # ── Detect Wordle result line ────────────
-                    # Handles: "Wordle 1 819 3/6*" and "Wordle 1838 4/6*"
                     wordle_match = re.match(
                         r"^Wordle\s+([\d][\d\s]*)\s+([1-6Xx])[/*]6",
                         stripped,
@@ -865,18 +854,18 @@ else:
                     )
                     if wordle_match:
                         # Save any previous pending entry first
-                        flush_pending()
+                        success_count      += save_pending(pending_entry, pending_grid_lines)
+                        pending_grid_lines  = []
 
                         w_num_raw  = wordle_match.group(1).replace(" ", "").strip()
                         score_char = wordle_match.group(2)
 
                         try:
-                            w_num   = int(w_num_raw)
-                            strokes = SCORE_MAP.get(score_char, 0)
-                            pending_entry      = (w_num, strokes, current_author)
-                            pending_grid_lines = []
+                            w_num         = int(w_num_raw)
+                            strokes       = SCORE_MAP.get(score_char, 0)
+                            pending_entry = (w_num, strokes, current_author)
                         except ValueError:
-                            continue
+                            pending_entry = None
                         continue
 
                     # ── Accumulate emoji grid lines ──────────
@@ -886,13 +875,11 @@ else:
                         continue
 
                 # Flush the last pending entry
-                flush_pending()
+                success_count += save_pending(pending_entry, pending_grid_lines)
 
                 if success_count > 0:
-                    skip_note = f" ({skipped_count} unrecognised)" if skipped_count else ""
                     st.session_state.post_msg = (
-                        f"⚡ Bulk import successful! "
-                        f"Saved {success_count} scores{skip_note}."
+                        f"⚡ Bulk import successful! Saved {success_count} scores."
                     )
                     st.rerun()
                 else:
