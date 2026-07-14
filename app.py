@@ -1287,7 +1287,9 @@ else:
                 hole_cells[player][h] = score_badge(
                     strokes, grid, h, both_have, active_round_start
                 )
-                if both_have and h <= 18:
+                # Always accumulate running total for this player
+                # regardless of whether opponent has played
+                if h <= 18:
                     running += strokes
                     thru_cells[player][h] = run_span(running)
                 else:
