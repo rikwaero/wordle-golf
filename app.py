@@ -91,105 +91,111 @@ st.markdown("""
         opacity: 1 !important;
     }
 
-    /* ── Scorecard table ── */
-    .scorecard-wrap {
-        overflow-x: auto;
-        margin-top: 15px;
-        border-radius: 10px;
-    }
-    .scorecard-wrap table {
-        width: 100%;
-        border-collapse: collapse;
-        background-color: #1a2744;
-        border-radius: 10px;
-        overflow: hidden;
-        display: table;
-    }
-    .scorecard-wrap th {
-        background-color: #0f1a2e;
-        color: #93c5fd;
-        font-weight: 700;
-        font-size: 14px !important;
-        padding: 10px 10px !important;
-        text-align: center !important;
-        border: 1px solid #2d3f6b;
-        min-width: 42px;
-    }
-    .scorecard-wrap td {
-        padding: 9px 8px !important;
-        text-align: center !important;
-        border: 1px solid #2d3f6b;
-        color: #e2e8f0;
-        font-size: 14px !important;
-        min-width: 42px;
-    }
-    .scorecard-wrap td:first-child,
-    .scorecard-wrap th:first-child {
-        text-align: left !important;
-        min-width: 90px;
-        background-color: #0f1a2e;
-        position: sticky;
-        left: 0;
-        z-index: 10;
-        font-size: 14px !important;
-    }
-    .scorecard-wrap tr.score-row:hover td {
-        background-color: #22305a;
-    }
+/* ── Scorecard table ── */
+.scorecard-wrap {
+    overflow-x: auto;
+    margin-top: 15px;
+    border-radius: 10px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+}
+.scorecard-wrap table {
+    width: 100%;
+    border-collapse: collapse;
+    background-color: #ffffff;
+    border-radius: 10px;
+    overflow: hidden;
+    display: table;
+}
+.scorecard-wrap th {
+    background-color: #1e3a5f;
+    color: #ffffff;
+    font-weight: 700;
+    font-size: 14px !important;
+    padding: 10px 10px !important;
+    text-align: center !important;
+    border: 1px solid #cbd5e1;
+    min-width: 42px;
+}
+.scorecard-wrap td {
+    padding: 9px 8px !important;
+    text-align: center !important;
+    border: 1px solid #cbd5e1;
+    color: #1e293b;
+    font-size: 14px !important;
+    min-width: 42px;
+    background-color: #ffffff;
+}
+.scorecard-wrap td:first-child,
+.scorecard-wrap th:first-child {
+    text-align: left !important;
+    min-width: 90px;
+    background-color: #1e3a5f;
+    color: #ffffff;
+    position: sticky;
+    left: 0;
+    z-index: 10;
+    font-size: 14px !important;
+}
+.scorecard-wrap tr.score-row:hover td {
+    background-color: #f0f7ff;
+}
+.scorecard-wrap tr.score-row:hover td:first-child {
+    background-color: #163154;
+}
+/* ── Running-total sub-row ── */
+.scorecard-wrap tr.thru-row td {
+    background-color: #f8fafc !important;
+    border-top: 1px dashed #94a3b8 !important;
+    color: #475569;
+    font-size: 13px !important;
+    padding: 5px 8px !important;
+}
+.scorecard-wrap tr.thru-row td:first-child {
+    color: #e2e8f0;
+    font-style: italic;
+    font-size: 13px !important;
+    background-color: #1e3a5f !important;
+}
+/* ── PGA score badges ── */
+.badge {
+    display: inline-block;
+    width: 28px;
+    height: 28px;
+    line-height: 28px;
+    border-radius: 50%;
+    font-weight: 700;
+    font-size: 13px !important;
+    text-align: center;
+}
+.badge-eagle     { background: #1d4ed8; color: #fff; border-radius: 50%; }
+.badge-birdie    { background: transparent; color: #1e293b;
+                   border: 2px solid #dc2626; border-radius: 50%; }
+.badge-par       { color: #1e293b; }
+.badge-bogey     { background: transparent; color: #1e293b;
+                   border: 2px solid #64748b; border-radius: 4px; }
+.badge-double    { background: transparent; color: #dc2626;
+                   border: 2px solid #dc2626; border-radius: 4px; }
+.badge-triple    { background: #fef2f2; color: #991b1b;
+                   border: 2px solid #dc2626; border-radius: 4px; }
+.badge-albatross { background: #7c3aed; color: #fff; border-radius: 50%; }
 
-    /* ── Running-total sub-row ── */
-    .scorecard-wrap tr.thru-row td {
-        background-color: #111d38 !important;
-        border-top: 1px dashed #2d3f6b !important;
-        color: #94a3b8;
-        font-size: 13px !important;
-        padding: 5px 8px !important;
-    }
-    .scorecard-wrap tr.thru-row td:first-child {
-        color: #475569;
-        font-style: italic;
-        font-size: 13px !important;
-        background-color: #111d38 !important;
-    }
+/* ── Running total colours ── */
+.run-under { color: #16a34a; font-weight: 600; }
+.run-over  { color: #dc2626; font-weight: 600; }
+.run-even  { color: #1e293b; font-weight: 600; }
+.run-blank { color: #94a3b8; }
 
-    /* ── PGA score badges ── */
-    .badge {
-        display: inline-block;
-        width: 28px;
-        height: 28px;
-        line-height: 28px;
-        border-radius: 50%;
-        font-weight: 700;
-        font-size: 13px !important;
-        text-align: center;
-    }
-    .badge-eagle   { background:#1d4ed8; color:#fff; border-radius:50%; }
-    .badge-birdie  { background:transparent; color:#e2e8f0;
-                     border: 2px solid #ef4444; border-radius:50%; }
-    .badge-par     { color:#e2e8f0; }
-    .badge-bogey   { background:transparent; color:#e2e8f0;
-                     border: 2px solid #e2e8f0; border-radius:4px; }
-    .badge-double  { background:transparent; color:#f87171;
-                     border: 2px solid #f87171; border-radius:4px; }
-    .badge-triple  { background:#7f1d1d; color:#fca5a5;
-                     border: 2px solid #ef4444; border-radius:4px; }
-    .badge-albatross { background:#7c3aed; color:#fff; border-radius:50%; }
-
-    /* ── Running total colours ── */
-    .run-under { color: #4ade80; font-weight:600; }
-    .run-over  { color: #f87171; font-weight:600; }
-    .run-even  { color: #e2e8f0; font-weight:600; }
-    .run-blank { color: #475569; }
-
-    /* ── Section label ── */
-    .section-label {
-        color: #93c5fd;
-        font-weight: 700;
-        font-size: 15px !important;
-        margin: 20px 0 6px 0;
-        letter-spacing: 0.05em;
-        text-transform: uppercase;
-    }
+/* ── Section label ── */
+.section-label {
+    color: #1e3a5f;
+    font-weight: 700;
+    font-size: 15px !important;
+    margin: 20px 0 6px 0;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    border-left: 4px solid #f59e0b;
+    padding-left: 8px;
+}
 
     /* ── Mobile ── */
     @media (max-width: 768px) {
