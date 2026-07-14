@@ -1304,7 +1304,7 @@ else:
         def get_bg(value, alpha):
             if value < 0:   return f"background:rgba(22,163,74,{alpha});"
             elif value > 0: return f"background:rgba(220,38,38,{alpha});"
-            else:           return f"background:rgba(180,83,9,{alpha});"
+            else:           return f"background:rgba(148,163,184,{alpha});"
 
         out = f"<p class='section-label'>{title}</p>"
         out += "<div class='scorecard-outer'><div class='scorecard-wrap'><table>"
