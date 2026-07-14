@@ -74,20 +74,16 @@ st.markdown("""
     border: 1px solid #2d3f6b;
     border-radius: 6px;
     padding: 10px;
-    position: absolute;
+    position: fixed;
     z-index: 99999;
-    top: 135%;
-    bottom: auto;
-    left: 50%;
-    margin-left: -90px;
     opacity: 0;
     transition: opacity 0.2s;
     font-family: monospace;
     font-size: 13px !important;
     line-height: 1.4;
     box-shadow: 0 10px 15px -3px rgba(0,0,0,0.5);
+    pointer-events: none;
 }
-
     .wordle-tooltip:hover .wordle-tooltiptext {
         visibility: visible !important;
         opacity: 1 !important;
@@ -218,6 +214,52 @@ st.markdown("""
         }
     }
 </style>
+<script>
+document.addEventListener('mouseover', function(e) {
+    const tooltip = e.target.closest('.wordle-tooltip');
+    if (tooltip) {
+        const tiptext = tooltip.querySelector('.wordle-tooltiptext');
+        if (tiptext) {
+            const rect = tooltip.getBoundingClientRect();
+            const tipHeight = tiptext.offsetHeight || 120;
+            const tipWidth = 180;
+            
+            // Position horizontally centered on badge
+            let left = rect.left + (rect.width / 2) - (tipWidth / 2);
+            
+            // Keep within viewport horizontally
+            if (left < 10) left = 10;
+            if (left + tipWidth > window.innerWidth - 10) {
+                left = window.innerWidth - tipWidth - 10;
+            }
+            
+            // Try above first, fall back to below if not enough room
+            let top;
+            if (rect.top > tipHeight + 10) {
+                top = rect.top - tipHeight - 10;
+            } else {
+                top = rect.bottom + 10;
+            }
+            
+            tiptext.style.left = left + 'px';
+            tiptext.style.top = top + 'px';
+            tiptext.style.visibility = 'visible';
+            tiptext.style.opacity = '1';
+        }
+    }
+});
+
+document.addEventListener('mouseout', function(e) {
+    const tooltip = e.target.closest('.wordle-tooltip');
+    if (tooltip) {
+        const tiptext = tooltip.querySelector('.wordle-tooltiptext');
+        if (tiptext) {
+            tiptext.style.visibility = 'hidden';
+            tiptext.style.opacity = '0';
+        }
+    }
+});
+</script>
 """, unsafe_allow_html=True)
 
 
