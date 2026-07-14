@@ -65,27 +65,26 @@ st.markdown("""
         text-align: center;
         width: 100%;
     }
-    .wordle-tooltip .wordle-tooltiptext {
-        visibility: hidden;
-        width: 180px;
-        background-color: #1a2744;
-        color: #fff;
-        text-align: center;
-        border: 1px solid #2d3f6b;
-        border-radius: 6px;
-        padding: 10px;
-        position: absolute;
-        z-index: 999;
-        bottom: 135%;
-        left: 50%;
-        margin-left: -90px;
-        opacity: 0;
-        transition: opacity 0.2s;
-        font-family: monospace;
-        font-size: 13px !important;
-        line-height: 1.4;
-        box-shadow: 0 10px 15px -3px rgba(0,0,0,0.5);
-    }
+.wordle-tooltip .wordle-tooltiptext {
+    visibility: hidden;
+    width: 180px;
+    background-color: #1a2744;
+    color: #fff;
+    text-align: center;
+    border: 1px solid #2d3f6b;
+    border-radius: 6px;
+    padding: 10px;
+    position: fixed;
+    z-index: 99999;
+    opacity: 0;
+    transition: opacity 0.2s;
+    font-family: monospace;
+    font-size: 13px !important;
+    line-height: 1.4;
+    box-shadow: 0 10px 15px -3px rgba(0,0,0,0.5);
+    transform: translateX(-50%);
+    pointer-events: none;
+}
     .wordle-tooltip:hover .wordle-tooltiptext {
         visibility: visible !important;
         opacity: 1 !important;
@@ -94,6 +93,7 @@ st.markdown("""
 /* ── Scorecard table ── */
 .scorecard-wrap {
     overflow-x: auto;
+    overflow-y: visible;
     margin-top: 15px;
     border-radius: 10px;
     box-shadow: 0 2px 8px rgba(0,0,0,0.15);
@@ -103,7 +103,7 @@ st.markdown("""
     border-collapse: collapse;
     background-color: #ffffff;
     border-radius: 10px;
-    overflow: hidden;
+    overflow: visible;
     display: table;
 }
 .scorecard-wrap th {
