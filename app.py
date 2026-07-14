@@ -1296,107 +1296,106 @@ else:
                     thru_cells[player][h] = run_span(0, blank=True)
 
     # ── Table builder ─────────────────────────────────────
-def build_scorecard(holes, title):
-    is_front   = title == "Front 9"
-    is_back    = title == "Back 9"
-    is_playoff = title == "⚡ Playoffs"
+    def build_scorecard(holes, title):
+        is_front   = title == "Front 9"
+        is_back    = title == "Back 9"
+        is_playoff = title == "⚡ Playoffs"
 
-    out = f"<p class='section-label'>{title}</p>"
-    out += "<div class='scorecard-outer'><div class='scorecard-wrap'><table>"
+        out = f"<p class='section-label'>{title}</p>"
+        out += "<div class='scorecard-outer'><div class='scorecard-wrap'><table>"
 
-    # ── Header row ──
-    out += "<thead><tr>"
-    out += "<th>Player</th>"
-    if is_front:
-        out += "<th>Total</th><th>F 1–9</th>"
-    elif is_back:
-        out += "<th>B 10–18</th>"
-    elif is_playoff:
-        out += "<th style='background:#7f1d1d; color:#fca5a5;'>PO</th>"
-
-    for h in holes:
-        lbl = f"{h}🚨" if h > 18 else str(h)
-        out += f"<th>{lbl}</th>"
-    out += "</tr></thead>"
-
-    # ── Player rows ──
-    out += "<tbody>"
-    sorted_players = sorted(PLAYERS, key=lambda p: scorecard_totals[p]["total"])
-
-    for player in sorted_players:
-        tot = scorecard_totals[player]
-
-        # ── Pre-calculate run_f9 before it's needed ──
-        run_f9 = 0
+        # ── Header row ──
+        out += "<thead><tr>"
+        out += "<th>Player</th>"
         if is_front:
-            for hh in range(1, 10):
-                hd = round_scores.get(hh, {})
-                if (raw_strokes[player].get(hh) is not None
-                        and all(p in hd for p in PLAYERS)):
-                    run_f9 += raw_strokes[player][hh]
-
-        # ── Score row ──
-        out += "<tr class='score-row'>"
-        out += f"<td><b>{player}</b></td>"
-
-        if is_front:
-            total_val = tot['total']
-            if total_val < 0:
-                total_bg = "background:rgba(22,163,74,0.2);"
-            elif total_val > 0:
-                total_bg = "background:rgba(220,38,38,0.2);"
-            else:
-                total_bg = "background:rgba(180,83,9,0.2);"
-
-            if run_f9 < 0:
-                thru_bg = "background:rgba(22,163,74,0.1);"
-            elif run_f9 > 0:
-                thru_bg = "background:rgba(220,38,38,0.1);"
-            else:
-                thru_bg = "background:rgba(180,83,9,0.1);"
-
-            out += (
-                f"<td style='{total_bg} font-weight:700;'>"
-                f"{fmt_total(tot['total'])}</td>"
-                f"<td style='{thru_bg}'>{run_span(run_f9)}</td>"
-            )
+            out += "<th>Total</th><th>F 1–9</th>"
         elif is_back:
-            out += f"<td>{fmt_total(tot['back_9'])}</td>"
+            out += "<th>B 10–18</th>"
         elif is_playoff:
-            out += "<td>—</td>"
+            out += "<th style='background:#7f1d1d; color:#fca5a5;'>PO</th>"
 
         for h in holes:
-            out += f"<td>{hole_cells[player].get(h, run_span(0, blank=True))}</td>"
-        out += "</tr>"
+            lbl = f"{h}🚨" if h > 18 else str(h)
+            out += f"<th>{lbl}</th>"
+        out += "</tr></thead>"
 
-        # ── Thru row ──
-        out += "<tr class='thru-row'>"
-        out += "<td></td>"
+        # ── Player rows ──
+        out += "<tbody>"
+        sorted_players = sorted(PLAYERS, key=lambda p: scorecard_totals[p]["total"])
 
-        if is_front:
-            out += (
-                f"<td style='background:rgba(180,83,9,0.1);'>"
-                f"{run_span(run_f9)}</td>"
-                "<td></td>"
-            )
-        elif is_back:
-            out += f"<td>{run_span(tot['total'])}</td>"
-        elif is_playoff:
+        for player in sorted_players:
+            tot = scorecard_totals[player]
+
+            # Pre-calculate run_f9 before it's needed
+            run_f9 = 0
+            if is_front:
+                for hh in range(1, 10):
+                    hd = round_scores.get(hh, {})
+                    if (raw_strokes[player].get(hh) is not None
+                            and all(p in hd for p in PLAYERS)):
+                        run_f9 += raw_strokes[player][hh]
+
+            # ── Score row ──
+            out += "<tr class='score-row'>"
+            out += f"<td><b>{player}</b></td>"
+
+            if is_front:
+                total_val = tot['total']
+                if total_val < 0:
+                    total_bg = "background:rgba(22,163,74,0.2);"
+                elif total_val > 0:
+                    total_bg = "background:rgba(220,38,38,0.2);"
+                else:
+                    total_bg = "background:rgba(180,83,9,0.2);"
+
+                if run_f9 < 0:
+                    thru_bg = "background:rgba(22,163,74,0.1);"
+                elif run_f9 > 0:
+                    thru_bg = "background:rgba(220,38,38,0.1);"
+                else:
+                    thru_bg = "background:rgba(180,83,9,0.1);"
+
+                out += (
+                    f"<td style='{total_bg} font-weight:700;'>"
+                    f"{fmt_total(tot['total'])}</td>"
+                    f"<td style='{thru_bg}'>{run_span(run_f9)}</td>"
+                )
+            elif is_back:
+                out += f"<td>{fmt_total(tot['back_9'])}</td>"
+            elif is_playoff:
+                out += "<td>—</td>"
+
+            for h in holes:
+                out += f"<td>{hole_cells[player].get(h, run_span(0, blank=True))}</td>"
+            out += "</tr>"
+
+            # ── Thru row ──
+            out += "<tr class='thru-row'>"
             out += "<td></td>"
 
-        for h in holes:
-            out += f"<td>{thru_cells[player].get(h, run_span(0, blank=True))}</td>"
-        out += "</tr>"
+            if is_front:
+                out += (
+                    f"<td style='background:rgba(180,83,9,0.1);'>"
+                    f"{run_span(run_f9)}</td>"
+                    "<td></td>"
+                )
+            elif is_back:
+                out += f"<td>{run_span(tot['total'])}</td>"
+            elif is_playoff:
+                out += "<td></td>"
 
-    out += "</tbody></table></div></div>"
-    return out
-    
+            for h in holes:
+                out += f"<td>{thru_cells[player].get(h, run_span(0, blank=True))}</td>"
+            out += "</tr>"
+
+        out += "</tbody></table></div></div>"
+        return out
+
     # ── Render ────────────────────────────────────────────
-    st.markdown(build_scorecard(front_9_holes,  "Front 9"),   unsafe_allow_html=True)
-    st.markdown(build_scorecard(back_9_holes,   "Back 9"),    unsafe_allow_html=True)
+    st.markdown(build_scorecard(front_9_holes,  "Front 9"),  unsafe_allow_html=True)
+    st.markdown(build_scorecard(back_9_holes,   "Back 9"),   unsafe_allow_html=True)
     if playoff_holes_display:
         st.markdown(build_scorecard(playoff_holes_display, "⚡ Playoffs"), unsafe_allow_html=True)
-
 
     # ----------------------------------------------------
     # 14. ARCHIVE BUTTON
@@ -1424,6 +1423,7 @@ def build_scorecard(holes, title):
             st.session_state.history = load_history()
             st.session_state.post_msg = "📦 Round archived successfully!"
             st.rerun()
+
 
 # ----------------------------------------------------
 # 15. BROADCAST COMMENTARY BOOTH
@@ -1699,6 +1699,7 @@ else:
 
                 sorted_players = sorted(PLAYERS, key=lambda p: h_tots[p]["total"])
                 for player in sorted_players:
+                    t = h_tots[player]  # ← ADD THIS LINE
 
                     # Score row
                     ht += f"<tr class='score-row'><td><b>{player}</b></td>"
@@ -1708,6 +1709,7 @@ else:
                         f"<td>{fmt_total(t['front'])}</td>"
                         f"<td>{fmt_total(t['back'])}</td>"
                     )
+
                     for h in hist_display:
                         ht += f"<td>{h_cells[player].get(h, '<span class=run-blank>—</span>')}</td>"
                     ht += "</tr>"
