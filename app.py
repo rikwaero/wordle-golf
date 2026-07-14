@@ -74,17 +74,20 @@ st.markdown("""
     border: 1px solid #2d3f6b;
     border-radius: 6px;
     padding: 10px;
-    position: fixed;
+    position: absolute;
     z-index: 99999;
+    top: 135%;
+    bottom: auto;
+    left: 50%;
+    margin-left: -90px;
     opacity: 0;
     transition: opacity 0.2s;
     font-family: monospace;
     font-size: 13px !important;
     line-height: 1.4;
     box-shadow: 0 10px 15px -3px rgba(0,0,0,0.5);
-    transform: translateX(-50%);
-    pointer-events: none;
 }
+
     .wordle-tooltip:hover .wordle-tooltiptext {
         visibility: visible !important;
         opacity: 1 !important;
