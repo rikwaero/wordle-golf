@@ -9,6 +9,8 @@ import pandas as pd
 from datetime import datetime
 import requests
 from bs4 import BeautifulSoup
+from openai import OpenAI
+
 
 # ----------------------------------------------------
 # 1. CONFIGURATION & STYLING
@@ -1377,143 +1379,295 @@ else:
 # ----------------------------------------------------
 st.write("---")
 st.header("🎙️ Live Broadcast Booth")
+
 if active_round_start is not None:
     if st.button("🎤 Get Live Commentary"):
-        comm_list = []
+
+        # ── Build match context for the LLM ──
+        def get_best_hole(player):
+            best_h, best_s = None, 99
+            for h in reg_completed_holes:
+                h_data = round_scores.get(h, {})
+                res = h_data.get(player)
+                if res is not None:
+                    s = res["strokes"] if isinstance(res, dict) else int(res)
+                    if s < best_s:
+                        best_s, best_h = s, h
+            return best_h, best_s
+
+        def get_worst_hole(player):
+            worst_h, worst_s = None, -99
+            for h in reg_completed_holes:
+                h_data = round_scores.get(h, {})
+                res = h_data.get(player)
+                if res is not None:
+                    s = res["strokes"] if isinstance(res, dict) else int(res)
+                    if s > worst_s:
+                        worst_s, worst_h = s, h
+            return worst_h, worst_s
+
+        def count_birdies_or_better(player):
+            count = 0
+            for h in reg_completed_holes:
+                h_data = round_scores.get(h, {})
+                res = h_data.get(player)
+                if res is not None:
+                    s = res["strokes"] if isinstance(res, dict) else int(res)
+                    if s <= -1:
+                        count += 1
+            return count
+
+        def recent_trend(player, last_n=3):
+            recent = reg_completed_holes[-last_n:] if len(reg_completed_holes) >= last_n else reg_completed_holes
+            total = 0
+            for h in recent:
+                h_data = round_scores.get(h, {})
+                res = h_data.get(player)
+                if res is not None:
+                    s = res["strokes"] if isinstance(res, dict) else int(res)
+                    total += s
+            return total
+
+        def score_name(s):
+            return {
+                -3: "albatross", -2: "eagle", -1: "birdie",
+                 0: "par", 1: "bogey", 2: "double bogey", 3: "triple bogey"
+            }.get(s, f"{s:+}")
+
+        def fmt_standing(val):
+            if val < 0: return f"{abs(val)}-under"
+            if val > 0: return f"{val}-over"
+            return "even par"
+
+        holes_played   = len(reg_completed_holes)
+        diff           = reg_totals[p1] - reg_totals[p2]
+        leader         = p2 if diff > 0 else p1
+        chaser         = p1 if diff > 0 else p2
+        lead_amt       = abs(diff)
+        p1_best_h,  p1_best_s  = get_best_hole(p1)
+        p2_best_h,  p2_best_s  = get_best_hole(p2)
+        p1_worst_h, p1_worst_s = get_worst_hole(p1)
+        p2_worst_h, p2_worst_s = get_worst_hole(p2)
+        p1_birdies = count_birdies_or_better(p1)
+        p2_birdies = count_birdies_or_better(p2)
+        p1_trend   = recent_trend(p1)
+        p2_trend   = recent_trend(p2)
+
+        # Build hole-by-hole summary string
+        hole_summary_lines = []
+        for h in reg_completed_holes:
+            h_data = round_scores.get(h, {})
+            p1_res = h_data.get(p1)
+            p2_res = h_data.get(p2)
+            p1_s = (p1_res["strokes"] if isinstance(p1_res, dict) else int(p1_res)) if p1_res else None
+            p2_s = (p2_res["strokes"] if isinstance(p2_res, dict) else int(p2_res)) if p2_res else None
+            if p1_s is not None and p2_s is not None:
+                hole_summary_lines.append(
+                    f"  Hole {h}: {p1}={score_name(p1_s)} ({p1_s:+}), "
+                    f"{p2}={score_name(p2_s)} ({p2_s:+})"
+                )
+
+        hole_summary = "\n".join(hole_summary_lines) if hole_summary_lines else "No holes completed yet."
+
+        # Build the full context prompt
         if playoff_active:
-            comm_list.append(
-                "🎙️ 'Absolute deadlock! Regulation couldn't split them. "
-                "We are in sudden death!'"
-            )
+            match_status = f"SUDDEN DEATH PLAYOFFS active at hole {current_playoff_hole}"
+        elif regulation_complete:
+            match_status = "Regulation complete"
         else:
-            comm_list.append(
-                "🎙️ 'Welcome to the clubhouse. "
-                "18-hole regulation is underway.'"
+            match_status = f"Regulation in progress, {holes_played}/18 holes completed"
+
+        context = f"""
+You are an enthusiastic, witty golf commentator covering a head-to-head Wordle Golf match.
+In Wordle Golf, players solve the daily Wordle puzzle. Their score is based on guesses:
+1 guess = albatross (-3), 2 = eagle (-2), 3 = birdie (-1), 4 = par (0), 5 = bogey (+1), 6 = double bogey (+2), fail = triple bogey (+3).
+Lower scores are better, just like real golf.
+
+Match status: {match_status}
+Players: {p1} vs {p2}
+Holes played: {holes_played}/18
+
+Current standings:
+- {p1}: {fmt_standing(reg_totals[p1])} (total: {reg_totals[p1]:+})
+- {p2}: {fmt_standing(reg_totals[p2])} (total: {reg_totals[p2]:+})
+{"- " + leader + " leads by " + str(lead_amt) + " stroke(s)" if diff != 0 else "- All square"}
+
+Hole by hole results so far:
+{hole_summary}
+
+Key stats:
+- {p1}: {p1_birdies} birdie(s) or better, best hole was hole {p1_best_h} ({score_name(p1_best_s) if p1_best_h else "N/A"}), worst hole was hole {p1_worst_h} ({score_name(p1_worst_s) if p1_worst_h else "N/A"})
+- {p2}: {p2_birdies} birdie(s) or better, best hole was hole {p2_best_h} ({score_name(p2_best_s) if p2_best_h else "N/A"}), worst hole was hole {p2_worst_h} ({score_name(p2_worst_s) if p2_worst_h else "N/A"})
+- Recent form (last 3 holes): {p1}={fmt_standing(p1_trend)}, {p2}={fmt_standing(p2_trend)}
+{"- PLAYOFF: Sudden death is active!" if playoff_active else ""}
+
+Please write 4-5 paragraphs of lively, dramatic golf commentary about this match.
+Mention specific holes, momentum shifts, standout scores, and the current standings.
+Use golf broadcasting language and make it entertaining. Do not use bullet points.
+Write it as if you are speaking live on air.
+"""
+
+        try:
+            client = OpenAI(api_key=st.secrets["openai"]["api_key"])
+            with st.spinner("🎙️ Our commentator is live on air..."):
+                response = client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": (
+                                "You are an enthusiastic live golf commentator. "
+                                "Be dramatic, use golf terminology, and keep it entertaining."
+                            )
+                        },
+                        {
+                            "role": "user",
+                            "content": context
+                        }
+                    ],
+                    max_tokens=600,
+                    temperature=0.85
+                )
+            commentary = response.choices[0].message.content.strip()
+            st.markdown(
+                f'<div class="commentary-box">{commentary}</div>',
+                unsafe_allow_html=True
             )
-            diff = reg_totals[p1] - reg_totals[p2]
-            if diff == 0 and reg_completed_holes:
-                comm_list.append(
-                    f"🎙️ 'Dead level through {len(reg_completed_holes)} synced holes!'"
-                )
-            elif diff != 0:
-                leader = p2 if diff > 0 else p1
-                chaser = p1 if diff > 0 else p2
-                comm_list.append(
-                    f"🎙️ '**{leader}** has the edge, "
-                    f"putting pressure on **{chaser}**.'"
-                )
-        st.markdown(
-            f'<div class="commentary-box">{"<br><br>".join(comm_list)}</div>',
-            unsafe_allow_html=True
+
+        except Exception as e:
+            st.error(f"Commentary unavailable: {e}")
+
+# ----------------------------------------------------
+# 16. HISTORICAL ARCHIVE
+# ----------------------------------------------------
+st.write("---")
+st.header("📜 Historical Tournament Records")
+
+if not st.session_state.history:
+    st.caption("No completed rounds archived yet.")
+else:
+    for i, entry in enumerate(reversed(st.session_state.history)):
+        round_start = entry["round_start"]
+        round_end = round_start + 17
+        label = (
+            f"Round {round_start}–{round_end} | "
+            f"🏆 {entry['winner']} | {entry['summary']} | "
+            f"📅 {entry['date_archived']}"
         )
-
         with st.expander(label):
-                scorecard = entry.get("scorecard", {})
-                if not scorecard:
-                    st.caption("No scorecard data available.")
-                else:
-                    hist_holes   = sorted([int(h) for h in scorecard.keys()])
-                    hist_reg     = [h for h in hist_holes if h <= 18]
-                    hist_playoff = [h for h in hist_holes if h > 18]
-                    hist_display = hist_reg + hist_playoff
+            scorecard = entry.get("scorecard", {})
+            if not scorecard:
+                st.caption("No scorecard data available.")
+            else:
+                hist_holes   = sorted([int(h) for h in scorecard.keys()])
+                hist_display = [h for h in hist_holes if h <= 18]
+                hist_playoff = [h for h in hist_holes if h > 18]
+                hist_display += hist_playoff
 
-                    # Collect raw strokes
-                    h_raw   = {p: {} for p in PLAYERS}
-                    h_tots  = {p: {"total":0,"front":0,"back":0} for p in PLAYERS}
+                # Collect raw strokes and totals per player
+                h_raw  = {p: {} for p in PLAYERS}
+                h_tots = {p: {"total": 0, "front": 0, "back": 0} for p in PLAYERS}
 
+                for h in hist_display:
+                    h_data = scorecard.get(str(h), {})
+                    for player in PLAYERS:
+                        res = h_data.get(player)
+                        if res is not None:
+                            s = res["strokes"] if isinstance(res, dict) else int(res)
+                            h_raw[player][h] = s
+                            if h <= 18:
+                                h_tots[player]["total"] += s
+                                if 1 <= h <= 9:
+                                    h_tots[player]["front"] += s
+                                else:
+                                    h_tots[player]["back"] += s
+                        else:
+                            h_raw[player][h] = None
+
+                # Build score and running total cells per player
+                h_cells = {p: {} for p in PLAYERS}
+                t_cells = {p: {} for p in PLAYERS}
+
+                for player in PLAYERS:
+                    running = 0
                     for h in hist_display:
                         h_data = scorecard.get(str(h), {})
-                        for player in PLAYERS:
-                            res = h_data.get(player)
-                            if res is None:
-                                h_raw[player][h] = None
+                        res    = h_data.get(player)
+
+                        if res is None:
+                            h_cells[player][h] = "<span class='run-blank'>—</span>"
+                            t_cells[player][h] = "<span class='run-blank'>—</span>"
+                        else:
+                            s       = h_raw[player][h]
+                            grid    = res.get("grid", "") if isinstance(res, dict) else ""
+                            clean_g = str(grid).replace("\\n", "<br>").replace("\n", "<br>").strip()
+
+                            wordle_num_for_hole = round_start + h - 1
+                            raw_answer = get_wordle_answer(wordle_num_for_hole)
+                            answer     = safe_answer_display(raw_answer)
+                            ans_line   = (
+                                f"<b style='color:#22c55e; font-size:14px; "
+                                f"letter-spacing:3px;'>🟩 {answer} 🟩</b><br><br>"
+                                if answer else ""
+                            )
+
+                            # Badge style
+                            if   s <= -3: css, lbl = "badge-albatross", f"{s:+}"
+                            elif s == -2: css, lbl = "badge-eagle",     f"{s:+}"
+                            elif s == -1: css, lbl = "badge-birdie",    f"{s:+}"
+                            elif s ==  0: css, lbl = "badge-par",       "E"
+                            elif s ==  1: css, lbl = "badge-bogey",     f"{s:+}"
+                            elif s ==  2: css, lbl = "badge-double",    f"{s:+}"
+                            else:         css, lbl = "badge-triple",    f"{s:+}"
+
+                            h_cells[player][h] = (
+                                '<div class="wordle-tooltip">'
+                                f"<span class='badge {css}'>{lbl}</span>"
+                                '<span class="wordle-tooltiptext">'
+                                f"<b>Hole {h}</b><br><br>"
+                                + ans_line + clean_g +
+                                "</span></div>"
+                            )
+
+                            if h <= 18:
+                                running += s
+                                t_cells[player][h] = run_span(running)
                             else:
-                                s = res["strokes"] if isinstance(res, dict) else int(res)
-                                h_raw[player][h] = s
-                                if h <= 18:
-                                    h_tots[player]["total"] += s
-                                    if 1 <= h <= 9:  h_tots[player]["front"] += s
-                                    else:            h_tots[player]["back"]  += s
-
-                    # Build cells
-                    h_cells = {p: {} for p in PLAYERS}
-                    t_cells = {p: {} for p in PLAYERS}
-
-                    for player in PLAYERS:
-                        running = 0
-                        for h in hist_display:
-                            h_data = scorecard.get(str(h), {})
-                            res    = h_data.get(player)
-                            if res is None:
-                                h_cells[player][h] = "<span class='run-blank'>—</span>"
                                 t_cells[player][h] = run_span(0, blank=True)
-                            else:
-                                s        = h_raw[player][h]
-                                grid     = res.get("grid","") if isinstance(res,dict) else ""
-                                clean_g  = str(grid).replace("\\n","<br>").replace("\n","<br>").strip()
 
-                                wordle_num_for_hole = round_start + h - 1
-                                raw_answer  = get_wordle_answer(wordle_num_for_hole)
-                                answer      = safe_answer_display(raw_answer)
-                                ans_line    = (
-                                    f"<b style='color:#22c55e;font-size:14px;"
-                                    f"letter-spacing:3px;'>🟩 {answer} 🟩</b><br><br>"
-                                    if answer else ""
-                                )
+                # Build table
+                ht  = "<div class='scorecard-outer'><div class='scorecard-wrap'>"
+                ht += "<table><thead><tr>"
+                ht += "<th>Player</th>"
+                ht += "<th style='background:#b45309; color:#fff;'>Total</th>"
+                ht += "<th>F 1–9</th>"
+                ht += "<th>B 10–18</th>"
+                for h in hist_display:
+                    ht += f"<th>{h}{'🚨' if h > 18 else ''}</th>"
+                ht += "</tr></thead><tbody>"
 
-                                if   s <= -3: css, lbl = "badge-albatross", f"{s:+}"
-                                elif s == -2: css, lbl = "badge-eagle",     f"{s:+}"
-                                elif s == -1: css, lbl = "badge-birdie",    f"{s:+}"
-                                elif s ==  0: css, lbl = "badge-par",       "E"
-                                elif s ==  1: css, lbl = "badge-bogey",     f"{s:+}"
-                                elif s ==  2: css, lbl = "badge-double",    f"{s:+}"
-                                else:         css, lbl = "badge-triple",    f"{s:+}"
+                for player in PLAYERS:
+                    t = h_tots[player]
 
-                                h_cells[player][h] = (
-                                    '<div class="wordle-tooltip">'
-                                    f"<span class='badge {css}'>{lbl}</span>"
-                                    '<span class="wordle-tooltiptext">'
-                                    f"<b>Hole {h}</b><br><br>"
-                                    + ans_line + clean_g +
-                                    "</span></div>"
-                                )
-
-                                if h <= 18:
-                                    running += s
-                                    t_cells[player][h] = run_span(running)
-                                else:
-                                    t_cells[player][h] = run_span(0, blank=True)
-
-                    # Render table
-                    ht = "<div class='scorecard-wrap'><table><thead><tr>"
-                    ht += "<th>Player</th>"
-                    ht += "<th style='background:#b45309;color:#fff;'>Total</th>"
-                    ht += "<th>F 1–9</th><th>B 10–18</th>"
+                    # Score row
+                    ht += f"<tr class='score-row'><td><b>{player}</b></td>"
+                    ht += (
+                        f"<td class='total-col'>"
+                        f"{fmt_total(t['total'])}</td>"
+                        f"<td>{fmt_total(t['front'])}</td>"
+                        f"<td>{fmt_total(t['back'])}</td>"
+                    )
                     for h in hist_display:
-                        ht += f"<th>{h}{'🚨' if h>18 else ''}</th>"
-                    ht += "</tr></thead><tbody>"
+                        ht += f"<td>{h_cells[player].get(h, '<span class=run-blank>—</span>')}</td>"
+                    ht += "</tr>"
 
-                    for player in PLAYERS:
-                        t = h_tots[player]
-                        # Score row
-                        ht += f"<tr class='score-row'><td><b>{player}</b></td>"
-                        ht += (
-                            f"<td style='background:rgba(180,83,9,0.2);font-weight:700;'>"
-                            f"{fmt_total(t['total'])}</td>"
-                            f"<td>{fmt_total(t['front'])}</td>"
-                            f"<td>{fmt_total(t['back'])}</td>"
-                        )
-                        for h in hist_display:
-                            ht += f"<td>{h_cells[player].get(h,'<span class=run-blank>—</span>')}</td>"
-                        ht += "</tr>"
+                    # Thru row
+                    ht += "<tr class='thru-row'><td></td>"
+                    ht += "<td class='total-col'></td>"
+                    ht += "<td></td><td></td>"
+                    for h in hist_display:
+                        ht += f"<td>{t_cells[player].get(h, '<span class=run-blank>—</span>')}</td>"
+                    ht += "</tr>"
 
-                        # Thru row
-                        ht += "<tr class='thru-row'><td></td>"
-                        ht += f"<td style='background:rgba(180,83,9,0.1);'>{run_span(t['total'])}</td>"
-                        ht += "<td></td><td></td>"
-                        for h in hist_display:
-                            ht += f"<td>{t_cells[player].get(h,'<span class=run-blank>—</span>')}</td>"
-                        ht += "</tr>"
-
-                    ht += "</tbody></table></div>"
-                    st.markdown(ht, unsafe_allow_html=True)
+                ht += "</tbody></table></div></div>"
+                st.markdown(ht, unsafe_allow_html=True)
