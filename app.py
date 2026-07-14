@@ -1301,6 +1301,11 @@ else:
         is_back    = title == "Back 9"
         is_playoff = title == "⚡ Playoffs"
 
+        def get_bg(value, alpha):
+            if value < 0:   return f"background:rgba(22,163,74,{alpha});"
+            elif value > 0: return f"background:rgba(220,38,38,{alpha});"
+            else:           return f"background:rgba(180,83,9,{alpha});"
+
         out = f"<p class='section-label'>{title}</p>"
         out += "<div class='scorecard-outer'><div class='scorecard-wrap'><table>"
 
@@ -1310,7 +1315,7 @@ else:
         if is_front:
             out += "<th>Total</th><th>F 1–9</th>"
         elif is_back:
-            out += "<th>B 10–18</th>"
+            out += "<th>Total</th><th>B 10–18</th>"
         elif is_playoff:
             out += "<th style='background:#7f1d1d; color:#fca5a5;'>PO</th>"
 
@@ -1339,72 +1344,22 @@ else:
             out += "<tr class='score-row'>"
             out += f"<td><b>{player}</b></td>"
 
-        if is_front:
-            total_val = tot['total']
-            if total_val < 0:
-                total_bg = "background:rgba(22,163,74,0.2);"
-            elif total_val > 0:
-                total_bg = "background:rgba(220,38,38,0.2);"
-            else:
-                total_bg = "background:rgba(180,83,9,0.2);"
-
-            if run_f9 < 0:
-                thru_bg = "background:rgba(22,163,74,0.1);"
-            elif run_f9 > 0:
-                thru_bg = "background:rgba(220,38,38,0.1);"
-            else:
-                thru_bg = "background:rgba(180,83,9,0.1);"
-
-            out += (
-                f"<td style='{total_bg} font-weight:700;'>"
-                f"{fmt_total(tot['total'])}</td>"
-                f"<td style='{thru_bg}'>{run_span(run_f9)}</td>"
-            )
-        elif is_back:
-            back_val = tot['back_9']
-            if back_val < 0:
-                back_bg = "background:rgba(22,163,74,0.2);"
-            elif back_val > 0:
-                back_bg = "background:rgba(220,38,38,0.2);"
-            else:
-                back_bg = "background:rgba(180,83,9,0.2);"
-
-            out += (
-                f"<td style='{back_bg} font-weight:700;'>"
-                f"{fmt_total(tot['back_9'])}</td>"
-            )
-        elif is_playoff:
-            out += "<td>—</td>"
-
-        for h in holes:
-            out += f"<td>{hole_cells[player].get(h, run_span(0, blank=True))}</td>"
-        out += "</tr>"
-
-        # ── Thru row ──
-        out += "<tr class='thru-row'>"
-        out += "<td></td>"
-
-        if is_front:
-            out += (
-                f"<td style='background:rgba(180,83,9,0.1);'>"
-                f"{run_span(run_f9)}</td>"
-                "<td></td>"
-            )
-        elif is_back:
-            total_val = tot['total']
-            if total_val < 0:
-                total_bg = "background:rgba(22,163,74,0.1);"
-            elif total_val > 0:
-                total_bg = "background:rgba(220,38,38,0.1);"
-            else:
-                total_bg = "background:rgba(180,83,9,0.1);"
-
-            out += (
-                f"<td style='{total_bg}'>"
-                f"{run_span(tot['total'])}</td>"
-            )
-        elif is_playoff:
-            out += "<td></td>"
+            if is_front:
+                out += (
+                    f"<td style='{get_bg(tot['total'], 0.2)} font-weight:700;'>"
+                    f"{fmt_total(tot['total'])}</td>"
+                    f"<td style='{get_bg(run_f9, 0.1)}'>"
+                    f"{run_span(run_f9)}</td>"
+                )
+            elif is_back:
+                out += (
+                    f"<td style='{get_bg(tot['total'], 0.2)} font-weight:700;'>"
+                    f"{fmt_total(tot['total'])}</td>"
+                    f"<td style='{get_bg(tot['back_9'], 0.1)}'>"
+                    f"{fmt_total(tot['back_9'])}</td>"
+                )
+            elif is_playoff:
+                out += "<td>—</td>"
 
             for h in holes:
                 out += f"<td>{hole_cells[player].get(h, run_span(0, blank=True))}</td>"
@@ -1416,12 +1371,18 @@ else:
 
             if is_front:
                 out += (
-                    f"<td style='background:rgba(180,83,9,0.1);'>"
+                    f"<td style='{get_bg(tot['total'], 0.1)}'>"
+                    f"{run_span(tot['total'])}</td>"
+                    f"<td style='{get_bg(run_f9, 0.05)}'>"
                     f"{run_span(run_f9)}</td>"
-                    "<td></td>"
                 )
             elif is_back:
-                out += f"<td>{run_span(tot['total'])}</td>"
+                out += (
+                    f"<td style='{get_bg(tot['total'], 0.1)}'>"
+                    f"{run_span(tot['total'])}</td>"
+                    f"<td style='{get_bg(tot['back_9'], 0.05)}'>"
+                    f"{run_span(tot['back_9'])}</td>"
+                )
             elif is_playoff:
                 out += "<td></td>"
 
@@ -1433,8 +1394,8 @@ else:
         return out
 
     # ── Render ────────────────────────────────────────────
-    st.markdown(build_scorecard(front_9_holes,  "Front 9"),  unsafe_allow_html=True)
-    st.markdown(build_scorecard(back_9_holes,   "Back 9"),   unsafe_allow_html=True)
+    st.markdown(build_scorecard(front_9_holes, "Front 9"),  unsafe_allow_html=True)
+    st.markdown(build_scorecard(back_9_holes,  "Back 9"),   unsafe_allow_html=True)
     if playoff_holes_display:
         st.markdown(build_scorecard(playoff_holes_display, "⚡ Playoffs"), unsafe_allow_html=True)
 
