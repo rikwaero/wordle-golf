@@ -1306,7 +1306,7 @@ else:
 
             # Thru row
             out += "<tr class='thru-row'>"
-            out += "<td>Thru</td>"
+            out += "<td></td>"
 
             if is_front:
                 # running total after hole 9
@@ -1503,7 +1503,7 @@ if active_round_start is not None:
                         ht += "</tr>"
 
                         # Thru row
-                        ht += "<tr class='thru-row'><td>Thru</td>"
+                        ht += "<tr class='thru-row'><td></td>"
                         ht += f"<td style='background:rgba(180,83,9,0.1);'>{run_span(t['total'])}</td>"
                         ht += "<td></td><td></td>"
                         for h in hist_display:
