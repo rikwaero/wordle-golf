@@ -1258,10 +1258,8 @@ else:
             # ---- Row 2: running cumulative total ----
             tbl += "<tr class='running-row'>"
             # Label cell for the running row
-            tbl += (
-                "<td style='color:#64748b; font-size:10px; "
-                "font-style:italic; border-top:none;'>Thru</td>"
-            )
+            tbl += "<td>Thru</td>"
+
 
             # Summary column(s) for running row — show overall running total
             if title == "Front 9":
@@ -1280,10 +1278,8 @@ else:
                 else:
                     run_col = "#e2e8f0"
                 tbl += (
-                    f"<td style='background-color: rgba(217,119,6,0.08); "
-                    f"font-size:10px; color:{run_col}; border-top:none;'>"
-                    f"{run_str}</td>"
-                    "<td style='border-top:none;'></td>"
+                    f"<td style='color:{run_col};'>{run_str}</td>"
+                    "<td></td>"
                 )
             elif title == "Back 9":
                 # Show total thru 18 in the B column
@@ -1295,10 +1291,7 @@ else:
                     run_col = "#ef4444"
                 else:
                     run_col = "#e2e8f0"
-                tbl += (
-                    f"<td style='font-size:10px; color:{run_col}; "
-                    f"border-top:none;'>{run_str}</td>"
-                )
+                tbl += f"<td style='color:{run_col};'>{run_str}</td>"
             elif title == "⚡ Playoffs":
                 tbl += "<td style='border-top:none;'></td>"
 
@@ -1306,10 +1299,7 @@ else:
                 run_cell = scorecard_data[player]["running_html"].get(
                     h, "<span style='color:#64748b'>—</span>"
                 )
-                tbl += (
-                    "<td style='border-top: 1px dashed #1e293b; "
-                    "background-color: #0a0f1a;'>" + run_cell + "</td>"
-                )
+                tbl += "<td>" + run_cell + "</td>"
             tbl += "</tr>"
 
         tbl += "</tbody></table>"
@@ -1545,11 +1535,9 @@ else:
                     # Row 1: raw scores
                     hist_table += "<tr>"
                     hist_table += f"<td><b>{player}</b></td>"
-                    hist_table += (
-                        f"<td style='background-color: rgba(217,119,6,0.15);"
-                        f" font-weight: bold; color: #f59e0b;'>"
-                        f"{tot_str}</td>"
-                    )
+                        hist_table += (
+                            f"<td>{run_cells.get(h, '<span style=color:#64748b>—</span>')}</td>"
+                        )
                     hist_table += f"<td>{f_str}</td>"
                     hist_table += f"<td>{b_str}</td>"
                     for h in hist_display:
@@ -1560,17 +1548,12 @@ else:
 
                     # Row 2: running totals
                     hist_table += "<tr class='running-row'>"
-                    hist_table += (
-                        "<td style='color:#64748b; font-size:10px; "
-                        "font-style:italic; border-top:none;'>Thru</td>"
-                    )
+                    hist_table += "<td>Thru</td>"
+
                     # Summary cols for running row
-                    hist_table += (
-                        "<td style='background-color:rgba(217,119,6,0.08);"
-                        " border-top:none;'></td>"
-                    )
-                    hist_table += "<td style='border-top:none;'></td>"
-                    hist_table += "<td style='border-top:none;'></td>"
+                    hist_table += "<td></td>"
+                    hist_table += "<td></td>"
+                    hist_table += "<td></td>"
                     for h in hist_display:
                         hist_table += (
                             f"<td style='border-top:1px dashed #1e293b;"
