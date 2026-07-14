@@ -772,44 +772,132 @@ else:
             if not bulk_text:
                 st.sidebar.error("Paste text before compiling!")
             else:
-                my_name = st.session_state.current_user
+                # ── Name normalisation ──────────────────────
+                NAME_ALIASES = {
+                    "dan williams": "Dan",
+                    "dan":          "Dan",
+                    "rikard wærø":  "Rik",
+                    "rikard waero": "Rik",
+                    "rikard":       "Rik",
+                    "rik":          "Rik",
+                }
+
+                def normalise_name(raw):
+                    return NAME_ALIASES.get(raw.strip().lower(), None)
+
+                my_name       = st.session_state.current_user
+                success_count = 0
+                skipped_count = 0
+
+                # ── Pre-process: strip commas, normalise whitespace ──
                 clean_bulk = bulk_text.replace(",", "")
-                matches = re.findall(
-                    r"Wordle\s*(\d[\d\s]*)\s+([1-6Xx])[/*]6",
-                    clean_bulk
-                )
+                lines      = clean_bulk.split("\n")
 
-                if not matches:
-                    st.sidebar.error("No valid Wordle blocks found in that text.")
-                else:
-                    success_count = 0
-                    for w_num_raw, score_char in matches:
-                        try:
-                            w_num = int(w_num_raw.replace(" ", "").strip())
-                            strokes = SCORE_MAP.get(score_char, 0)
+                # ── State machine: track current author ──────
+                current_author = my_name
+                pending_grid_lines = []
+                pending_entry      = None  # (w_num, strokes, author)
 
-                            pattern_data = {
-                                "strokes": strokes,
-                                "summary": "Bulk Import",
-                                "grid": ""
-                            }
+                def flush_pending():
+                    """Save the pending entry with its accumulated grid."""
+                    nonlocal pending_entry, pending_grid_lines, success_count
+                    if pending_entry is None:
+                        return
+                    w_num, strokes, author = pending_entry
+                    grid_visual = "\n".join(pending_grid_lines)
 
-                            if w_num not in st.session_state.scores:
-                                st.session_state.scores[w_num] = {}
-                            st.session_state.scores[w_num][my_name] = pattern_data
+                    if grid_visual:
+                        greens  = grid_visual.count("🟩")
+                        yellows = grid_visual.count("🟨")
+                        misses  = grid_visual.count("⬛") + grid_visual.count("⬜")
+                        summary = f"🟩 {greens} | 🟨 {yellows} | 🟥 {misses}"
+                    else:
+                        summary = "Bulk Import"
 
-                            save_score(w_num, my_name, strokes, "Bulk Import", "")
-                            success_count += 1
-                        except Exception:
+                    pattern_data = {
+                        "strokes": strokes,
+                        "summary": summary,
+                        "grid":    grid_visual
+                    }
+
+                    if w_num not in st.session_state.scores:
+                        st.session_state.scores[w_num] = {}
+                    st.session_state.scores[w_num][author] = pattern_data
+                    save_score(w_num, author, strokes, summary, grid_visual)
+                    success_count += 1
+
+                    pending_entry      = None
+                    pending_grid_lines = []
+
+                for line in lines:
+                    stripped = line.strip()
+                    if not stripped:
+                        continue
+
+                    # ── Skip date/archive header lines ──────
+                    # Matches: "Archive June 12, 2026" or "1 Jul 2026, 19:10"
+                    if re.match(
+                        r"^(Archive\s+)?"
+                        r"(\d{1,2}\s+\w+\s+\d{4}|\w+\s+\d{1,2},?\s+\d{4})"
+                        r"(,?\s*\d{1,2}:\d{2})?$",
+                        stripped, re.IGNORECASE
+                    ):
+                        continue
+
+                    # ── Detect standalone player name line ──
+                    # e.g. "Dan" or "Rikard Wærø" on its own line
+                    name_only = re.match(
+                        r"^([A-Za-zÀ-ÖØ-öø-ÿ]+(?:\s[A-Za-zÀ-ÖØ-öø-ÿ]+)*)$",
+                        stripped
+                    )
+                    if name_only:
+                        resolved = normalise_name(name_only.group(1))
+                        if resolved in PLAYERS:
+                            current_author = resolved
                             continue
 
-                    if success_count > 0:
-                        st.session_state.post_msg = (
-                            f"⚡ Bulk import successful! Saved {success_count} scores."
-                        )
-                        st.rerun()
-                    else:
-                        st.sidebar.error("No scores could be extracted.")
+                    # ── Detect Wordle result line ────────────
+                    # Handles: "Wordle 1 819 3/6*" and "Wordle 1838 4/6*"
+                    wordle_match = re.match(
+                        r"^Wordle\s+([\d][\d\s]*)\s+([1-6Xx])[/*]6",
+                        stripped,
+                        re.IGNORECASE
+                    )
+                    if wordle_match:
+                        # Save any previous pending entry first
+                        flush_pending()
+
+                        w_num_raw  = wordle_match.group(1).replace(" ", "").strip()
+                        score_char = wordle_match.group(2)
+
+                        try:
+                            w_num   = int(w_num_raw)
+                            strokes = SCORE_MAP.get(score_char, 0)
+                            pending_entry      = (w_num, strokes, current_author)
+                            pending_grid_lines = []
+                        except ValueError:
+                            continue
+                        continue
+
+                    # ── Accumulate emoji grid lines ──────────
+                    if any(e in stripped for e in ["🟩", "🟨", "⬛", "⬜"]):
+                        if pending_entry is not None:
+                            pending_grid_lines.append(stripped)
+                        continue
+
+                # Flush the last pending entry
+                flush_pending()
+
+                if success_count > 0:
+                    skip_note = f" ({skipped_count} unrecognised)" if skipped_count else ""
+                    st.session_state.post_msg = (
+                        f"⚡ Bulk import successful! "
+                        f"Saved {success_count} scores{skip_note}."
+                    )
+                    st.rerun()
+                else:
+                    st.sidebar.error("No scores could be extracted.")
+
 
 # ----------------------------------------------------
 # 8. POST MESSAGE DISPLAY
