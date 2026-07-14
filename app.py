@@ -1056,7 +1056,6 @@ else:
     front_9_holes = list(range(1, 10))
     back_9_holes = list(range(10, 19))
 
-    # FIXED: was > 20, now > 18 to correctly capture all playoff holes
     playoff_holes_display = []
     if playoff_active or playoff_winner:
         playoff_holes_display = sorted([
@@ -1066,7 +1065,7 @@ else:
 
     display_holes = front_9_holes + back_9_holes + playoff_holes_display
 
-    # Calculate totals for display
+    # Calculate totals and per-hole data for display
     scorecard_data = {}
     for player in PLAYERS:
         scorecard_data[player] = {
@@ -1074,9 +1073,12 @@ else:
             "synced_count": 0,
             "front_9": 0,
             "back_9": 0,
-            "holes_html": {}
+            "holes_html": {},      # raw score cell html
+            "running_html": {},    # cumulative score cell html
+            "raw_strokes": {}      # numeric strokes per hole (or None)
         }
 
+    # First pass: collect raw strokes
     for h in display_holes:
         h_data = round_scores.get(h, {})
         both_have = all(p in h_data for p in PLAYERS)
@@ -1084,7 +1086,34 @@ else:
         for player in PLAYERS:
             res = h_data.get(player)
             if res is None:
-                cell_html = "<span style='color: #64748b;'>⏳</span>"
+                scorecard_data[player]["raw_strokes"][h] = None
+            else:
+                strokes = res["strokes"] if isinstance(res, dict) else int(res)
+                scorecard_data[player]["raw_strokes"][h] = strokes
+
+                if both_have and h <= 18:
+                    scorecard_data[player]["total"] += strokes
+                    scorecard_data[player]["synced_count"] += 1
+                    if 1 <= h <= 9:
+                        scorecard_data[player]["front_9"] += strokes
+                    elif 10 <= h <= 18:
+                        scorecard_data[player]["back_9"] += strokes
+
+    # Second pass: build hole HTML cells and running totals
+    for player in PLAYERS:
+        running_total = 0
+        for h in display_holes:
+            h_data = round_scores.get(h, {})
+            both_have = all(p in h_data for p in PLAYERS)
+            res = h_data.get(player)
+
+            if res is None:
+                scorecard_data[player]["holes_html"][h] = (
+                    "<span style='color: #64748b;'>⏳</span>"
+                )
+                scorecard_data[player]["running_html"][h] = (
+                    "<span style='color: #64748b;'>—</span>"
+                )
             else:
                 strokes = res["strokes"] if isinstance(res, dict) else int(res)
                 raw_grid = res.get("grid", "") if isinstance(res, dict) else ""
@@ -1095,15 +1124,11 @@ else:
                     .strip()
                 )
 
+                # Update running total only for synced regulation holes
                 if both_have and h <= 18:
-                    scorecard_data[player]["total"] += strokes
-                    scorecard_data[player]["synced_count"] += 1
-                    if 1 <= h <= 9:
-                        scorecard_data[player]["front_9"] += strokes
-                    elif 10 <= h <= 18:
-                        scorecard_data[player]["back_9"] += strokes
+                    running_total += strokes
 
-                # Only show answer if both players have submitted
+                # Answer reveal logic
                 if both_have:
                     wordle_num_for_hole = active_round_start + h - 1
                     raw_answer = get_wordle_answer(wordle_num_for_hole)
@@ -1119,7 +1144,8 @@ else:
                         "both players submit</i><br><br>"
                     )
 
-                cell_html = (
+                # Raw score cell (with tooltip)
+                scorecard_data[player]["holes_html"][h] = (
                     '<div class="wordle-tooltip">' + f"{strokes:+}" +
                     '<span class="wordle-tooltiptext">'
                     "<b>Hole " + str(h) + ":</b><br><br>" +
@@ -1128,16 +1154,42 @@ else:
                     "</span></div>"
                 )
 
-            scorecard_data[player]["holes_html"][h] = cell_html
+                # Running total cell — only show if synced regulation hole
+                if both_have and h <= 18:
+                    run_str = f"{running_total:+}" if running_total != 0 else "E"
+                    # Color: green if under par, red if over, white if even
+                    if running_total < 0:
+                        run_color = "#22c55e"
+                    elif running_total > 0:
+                        run_color = "#ef4444"
+                    else:
+                        run_color = "#e2e8f0"
+                    scorecard_data[player]["running_html"][h] = (
+                        f"<span style='color:{run_color}; font-size:10px;'>"
+                        f"{run_str}</span>"
+                    )
+                else:
+                    scorecard_data[player]["running_html"][h] = (
+                        "<span style='color: #64748b;'>—</span>"
+                    )
 
     total_synced = scorecard_data[p1]["synced_count"]
 
     def build_hole_table(holes, title):
-        """Builds an HTML table for a given set of holes."""
-        tbl = f"<p style='color:#94a3b8; font-weight:bold; margin-top:15px;'>{title}</p>"
+        """
+        Builds an HTML table for a given set of holes.
+        Each player gets two rows:
+          Row 1 — player name + raw hole scores
+          Row 2 — 'Thru' label + running cumulative score after each hole
+        """
+        tbl = (
+            f"<p style='color:#94a3b8; font-weight:bold; "
+            f"margin-top:15px;'>{title}</p>"
+        )
         tbl += "<table><thead><tr>"
         tbl += "<th>Player</th>"
 
+        # Summary columns (vary by section)
         if title == "Front 9":
             tbl += (
                 "<th style='background-color: #d97706; color: white;'>"
@@ -1147,7 +1199,10 @@ else:
         elif title == "Back 9":
             tbl += "<th style='background-color: #1e293b;'>B (10-18)</th>"
         elif title == "⚡ Playoffs":
-            tbl += "<th style='background-color: #ef4444; color:white;'>Playoff</th>"
+            tbl += (
+                "<th style='background-color: #ef4444; "
+                "color:white;'>Playoff</th>"
+            )
 
         for h in holes:
             lbl = str(h)
@@ -1157,6 +1212,7 @@ else:
         tbl += "</tr></thead><tbody>"
 
         for player in PLAYERS:
+            # ---- Row 1: raw scores ----
             tbl += "<tr>"
             tbl += "<td><b>" + player + "</b></td>"
 
@@ -1184,6 +1240,66 @@ else:
                 tbl += "<td>" + cell + "</td>"
             tbl += "</tr>"
 
+            # ---- Row 2: running cumulative total ----
+            tbl += (
+                "<tr style='background-color: #0a0f1a; "
+                "border-top: none;'>"
+            )
+            # Label cell for the running row
+            tbl += (
+                "<td style='color:#64748b; font-size:10px; "
+                "font-style:italic; border-top:none;'>Thru</td>"
+            )
+
+            # Summary column(s) for running row — show overall running total
+            if title == "Front 9":
+                # After front 9: show running after hole 9, and front 9 subtotal
+                run_after_f9 = 0
+                for hh in range(1, 10):
+                    v = scorecard_data[player]["raw_strokes"].get(hh)
+                    h_data_check = round_scores.get(hh, {})
+                    if v is not None and all(p in h_data_check for p in PLAYERS):
+                        run_after_f9 += v
+                run_str = f"{run_after_f9:+}" if run_after_f9 != 0 else "E"
+                if run_after_f9 < 0:
+                    run_col = "#22c55e"
+                elif run_after_f9 > 0:
+                    run_col = "#ef4444"
+                else:
+                    run_col = "#e2e8f0"
+                tbl += (
+                    f"<td style='background-color: rgba(217,119,6,0.08); "
+                    f"font-size:10px; color:{run_col}; border-top:none;'>"
+                    f"{run_str}</td>"
+                    "<td style='border-top:none;'></td>"
+                )
+            elif title == "Back 9":
+                # Show total thru 18 in the B column
+                run_after_b9 = scorecard_data[player]["total"]
+                run_str = f"{run_after_b9:+}" if run_after_b9 != 0 else "E"
+                if run_after_b9 < 0:
+                    run_col = "#22c55e"
+                elif run_after_b9 > 0:
+                    run_col = "#ef4444"
+                else:
+                    run_col = "#e2e8f0"
+                tbl += (
+                    f"<td style='font-size:10px; color:{run_col}; "
+                    f"border-top:none;'>{run_str}</td>"
+                )
+            elif title == "⚡ Playoffs":
+                tbl += "<td style='border-top:none;'></td>"
+
+            for h in holes:
+                run_cell = scorecard_data[player]["running_html"].get(
+                    h, "<span style='color:#64748b'>—</span>"
+                )
+                tbl += (
+                    "<td style='border-top: 1px dashed #1e293b; "
+                    "background-color: #0a0f1a;'>" + run_cell + "</td>"
+                )
+            tbl += "</tr>"
+
         tbl += "</tbody></table>"
         return tbl
 
@@ -1202,9 +1318,12 @@ else:
     # Render Playoffs if active
     if playoff_holes_display:
         st.markdown(
-            build_hole_table(playoff_holes_display, "⚡ Playoffs").replace("\n", "").strip(),
+            build_hole_table(
+                playoff_holes_display, "⚡ Playoffs"
+            ).replace("\n", "").strip(),
             unsafe_allow_html=True
         )
+
 
     # ----------------------------------------------------
     # 14. ARCHIVE BUTTON
@@ -1297,7 +1416,10 @@ else:
 
                 hist_table = "<table><thead><tr>"
                 hist_table += "<th>Player</th>"
-                hist_table += "<th style='background-color: #d97706; color:white;'>Total</th>"
+                hist_table += (
+                    "<th style='background-color: #d97706; "
+                    "color:white;'>Total</th>"
+                )
                 hist_table += "<th>F (1-9)</th>"
                 hist_table += "<th>B (10-18)</th>"
                 for h in hist_display:
@@ -1309,22 +1431,21 @@ else:
                     total = 0
                     front = 0
                     back = 0
-                    cells = {}
+                    cells = {}       # raw score cells
+                    run_cells = {}   # running total cells
+                    raw_strokes = {}
 
+                    # Collect raw strokes
                     for h in hist_display:
                         h_data = scorecard.get(str(h), {})
                         res = h_data.get(player)
-                        if res is None:
-                            cells[h] = "<span style='color:#64748b'>—</span>"
-                        else:
-                            strokes = res["strokes"] if isinstance(res, dict) else int(res)
-                            raw_grid = res.get("grid", "") if isinstance(res, dict) else ""
-                            clean_grid = (
-                                str(raw_grid)
-                                .replace("\\n", "<br>")
-                                .replace("\n", "<br>")
-                                .strip()
+                        if res is not None:
+                            strokes = (
+                                res["strokes"]
+                                if isinstance(res, dict)
+                                else int(res)
                             )
+                            raw_strokes[h] = strokes
                             if h <= 18:
                                 total += strokes
                                 if 1 <= h <= 9:
@@ -1332,38 +1453,124 @@ else:
                                 elif 10 <= h <= 18:
                                     back += strokes
 
+                    # Build cells with running total
+                    running = 0
+                    for h in hist_display:
+                        h_data = scorecard.get(str(h), {})
+                        res = h_data.get(player)
+
+                        if res is None:
+                            cells[h] = (
+                                "<span style='color:#64748b'>—</span>"
+                            )
+                            run_cells[h] = (
+                                "<span style='color:#64748b'>—</span>"
+                            )
+                        else:
+                            strokes = raw_strokes[h]
+                            raw_grid = (
+                                res.get("grid", "")
+                                if isinstance(res, dict)
+                                else ""
+                            )
+                            clean_grid = (
+                                str(raw_grid)
+                                .replace("\\n", "<br>")
+                                .replace("\n", "<br>")
+                                .strip()
+                            )
+
+                            if h <= 18:
+                                running += strokes
+
                             wordle_num_for_hole = round_start + h - 1
-                            raw_answer = get_wordle_answer(wordle_num_for_hole)
+                            raw_answer = get_wordle_answer(
+                                wordle_num_for_hole
+                            )
                             answer = safe_answer_display(raw_answer)
                             answer_line = (
-                                f"<b style='color:#22c55e; font-size:15px; "
-                                f"letter-spacing:3px;'>🟩 {answer} 🟩</b><br><br>"
+                                f"<b style='color:#22c55e; font-size:15px;"
+                                f" letter-spacing:3px;'>"
+                                f"🟩 {answer} 🟩</b><br><br>"
                                 if answer else ""
                             )
+
+                            # Raw score cell
                             cells[h] = (
-                                '<div class="wordle-tooltip">' + f"{strokes:+}" +
-                                '<span class="wordle-tooltiptext">'
-                                "<b>Hole " + str(h) + ":</b><br><br>" +
-                                answer_line +
-                                clean_grid +
-                                "</span></div>"
+                                '<div class="wordle-tooltip">'
+                                + f"{strokes:+}"
+                                + '<span class="wordle-tooltiptext">'
+                                + "<b>Hole " + str(h) + ":</b><br><br>"
+                                + answer_line
+                                + clean_grid
+                                + "</span></div>"
                             )
+
+                            # Running total cell
+                            if h <= 18:
+                                run_str = (
+                                    f"{running:+}" if running != 0 else "E"
+                                )
+                                if running < 0:
+                                    run_color = "#22c55e"
+                                elif running > 0:
+                                    run_color = "#ef4444"
+                                else:
+                                    run_color = "#e2e8f0"
+                                run_cells[h] = (
+                                    f"<span style='color:{run_color};"
+                                    f" font-size:10px;'>{run_str}</span>"
+                                )
+                            else:
+                                run_cells[h] = (
+                                    "<span style='color:#64748b'>—</span>"
+                                )
 
                     tot_str = f"{total:+}" if total != 0 else "E"
                     f_str = f"{front:+}" if front != 0 else "E"
                     b_str = f"{back:+}" if back != 0 else "E"
 
+                    # Row 1: raw scores
                     hist_table += "<tr>"
                     hist_table += f"<td><b>{player}</b></td>"
                     hist_table += (
-                        f"<td style='background-color: rgba(217,119,6,0.15); "
-                        f"font-weight: bold; color: #f59e0b;'>{tot_str}</td>"
+                        f"<td style='background-color: rgba(217,119,6,0.15);"
+                        f" font-weight: bold; color: #f59e0b;'>"
+                        f"{tot_str}</td>"
                     )
                     hist_table += f"<td>{f_str}</td>"
                     hist_table += f"<td>{b_str}</td>"
                     for h in hist_display:
-                        hist_table += f"<td>{cells.get(h, '<span style=color:#64748b>—</span>')}</td>"
+                        hist_table += (
+                            f"<td>{cells.get(h, '<span style=color:#64748b>—</span>')}</td>"
+                        )
+                    hist_table += "</tr>"
+
+                    # Row 2: running totals
+                    hist_table += (
+                        "<tr style='background-color:#0a0f1a;'>"
+                    )
+                    hist_table += (
+                        "<td style='color:#64748b; font-size:10px; "
+                        "font-style:italic; border-top:none;'>Thru</td>"
+                    )
+                    # Summary cols for running row
+                    hist_table += (
+                        "<td style='background-color:rgba(217,119,6,0.08);"
+                        " border-top:none;'></td>"
+                    )
+                    hist_table += "<td style='border-top:none;'></td>"
+                    hist_table += "<td style='border-top:none;'></td>"
+                    for h in hist_display:
+                        hist_table += (
+                            f"<td style='border-top:1px dashed #1e293b;"
+                            f" background-color:#0a0f1a;'>"
+                            f"{run_cells.get(h, '<span style=color:#64748b>—</span>')}</td>"
+                        )
                     hist_table += "</tr>"
 
                 hist_table += "</tbody></table>"
-                st.markdown(hist_table.replace("\n", "").strip(), unsafe_allow_html=True)
+                st.markdown(
+                    hist_table.replace("\n", "").strip(),
+                    unsafe_allow_html=True
+                )
