@@ -1535,7 +1535,7 @@ else:
                     # Row 1: raw scores
                     hist_table += "<tr>"
                     hist_table += f"<td><b>{player}</b></td>"
-                        hist_table += (
+                    hist_table += (
                             f"<td>{run_cells.get(h, '<span style=color:#64748b>—</span>')}</td>"
                         )
                     hist_table += f"<td>{f_str}</td>"
