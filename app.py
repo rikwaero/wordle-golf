@@ -58,151 +58,174 @@ st.markdown("""
         line-height: 1.6;
     }
 
-/* ── Tooltip ── */
-.wordle-tooltip {
-    position: relative;
-    display: inline-block;
-    cursor: help;
-    font-weight: bold;
-    text-align: center;
-    width: 100%;
-}
-.wordle-tooltip .wordle-tooltiptext {
-    visibility: hidden;
-    width: 180px;
-    background-color: #1a2744;
-    color: #fff;
-    text-align: center;
-    border: 1px solid #2d3f6b;
-    border-radius: 6px;
-    padding: 10px;
-    position: absolute;
-    z-index: 99999;
-    bottom: 135%;
-    left: 50%;
-    margin-left: -90px;
-    opacity: 0;
-    transition: opacity 0.2s;
-    font-family: monospace;
-    font-size: 13px !important;
-    line-height: 1.4;
-    box-shadow: 0 10px 15px -3px rgba(0,0,0,0.5);
-}
-.wordle-tooltip:hover .wordle-tooltiptext {
-    visibility: visible !important;
-    opacity: 1 !important;
-}
+    /* ── Tooltip ── */
+    .wordle-tooltip {
+        position: static;
+        display: inline-block;
+        cursor: help;
+        font-weight: bold;
+        text-align: center;
+        width: 100%;
+    }
+    .wordle-tooltip .wordle-tooltiptext {
+        visibility: hidden;
+        width: 180px;
+        background-color: #1a2744;
+        color: #fff;
+        text-align: center;
+        border: 1px solid #2d3f6b;
+        border-radius: 6px;
+        padding: 10px;
+        position: fixed;
+        z-index: 999999;
+        opacity: 0;
+        transition: opacity 0.2s;
+        font-family: monospace;
+        font-size: 13px !important;
+        line-height: 1.4;
+        box-shadow: 0 10px 15px -3px rgba(0,0,0,0.5);
+        transform: translateX(-50%);
+        left: 50%;
+        top: 40%;
+        pointer-events: none;
+    }
+    .wordle-tooltip:hover .wordle-tooltiptext {
+        visibility: visible !important;
+        opacity: 1 !important;
+    }
 
-/* ── Scorecard table ── */
-.scorecard-outer {
-    overflow: visible;
-    position: relative;
-    margin-top: 15px;
-}
-.scorecard-wrap {
-    overflow-x: auto;
-    margin-bottom: 0;
-    border-radius: 10px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-}
-.scorecard-wrap table {
-    width: 100%;
-    border-collapse: collapse;
-    background-color: #ffffff;
-    border-radius: 10px;
-    overflow: visible;
-    display: table;
-}
-.scorecard-wrap th {
-    background-color: #1e3a5f;
-    color: #ffffff;
-    font-weight: 700;
-    font-size: 14px !important;
-    padding: 10px 10px !important;
-    text-align: center !important;
-    border: 1px solid #cbd5e1;
-    min-width: 42px;
-}
-.scorecard-wrap td {
-    padding: 9px 8px !important;
-    text-align: center !important;
-    border: 1px solid #cbd5e1;
-    color: #1e293b;
-    font-size: 14px !important;
-    min-width: 42px;
-    background-color: #ffffff;
-}
-.scorecard-wrap td:first-child,
-.scorecard-wrap th:first-child {
-    text-align: left !important;
-    min-width: 90px;
-    background-color: #1e3a5f;
-    color: #ffffff;
-    position: sticky;
-    left: 0;
-    z-index: 10;
-    font-size: 14px !important;
-}
-.scorecard-wrap tr.score-row:hover td {
-    background-color: #f0f7ff;
-}
-.scorecard-wrap tr.score-row:hover td:first-child {
-    background-color: #163154;
-}
-/* ── Running-total sub-row ── */
-.scorecard-wrap tr.thru-row td {
-    background-color: #f8fafc !important;
-    border-top: 1px dashed #94a3b8 !important;
-    color: #475569;
-    font-size: 13px !important;
-    padding: 5px 8px !important;
-}
-.scorecard-wrap tr.thru-row td:first-child {
-    color: #e2e8f0;
-    font-style: italic;
-    font-size: 13px !important;
-    background-color: #1e3a5f !important;
-}
-/* ── PGA score badges ── */
-.badge {
-    display: inline-block;
-    width: 28px;
-    height: 28px;
-    line-height: 28px;
-    border-radius: 50%;
-    font-weight: 700;
-    font-size: 13px !important;
-    text-align: center;
-}
-.badge-eagle     { background: #1d4ed8; color: #fff; border-radius: 50%; }
-.badge-birdie    { background: transparent; color: #1e293b;
-                   border: 2px solid #dc2626; border-radius: 50%; }
-.badge-par       { color: #1e293b; }
-.badge-bogey     { background: transparent; color: #1e293b;
-                   border: 2px solid #64748b; border-radius: 4px; }
-.badge-double    { background: transparent; color: #dc2626;
-                   border: 2px solid #dc2626; border-radius: 4px; }
-.badge-triple    { background: #fef2f2; color: #991b1b;
-                   border: 2px solid #dc2626; border-radius: 4px; }
-.badge-albatross { background: #7c3aed; color: #fff; border-radius: 50%; }
+    /* ── Scorecard outer wrapper ── */
+    .scorecard-outer {
+        overflow: visible;
+        position: relative;
+        margin-top: 15px;
+    }
 
-/* ── Running total colours ── */
-.run-under { color: #16a34a; font-weight: 600; }
-.run-over  { color: #dc2626; font-weight: 600; }
-.run-even  { color: #1e293b; font-weight: 600; }
-.run-blank { color: #94a3b8; }
+    /* ── Scorecard scroll wrapper ── */
+    .scorecard-wrap {
+        overflow-x: auto;
+        overflow-y: visible;
+        margin-bottom: 0;
+        border-radius: 10px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    }
 
-/* ── Section label ── */
-.section-label {
-    color: #1e3a5f;
-    font-weight: 700;
-    font-size: 15px !important;
-    margin: 20px 0 6px 0;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
-    border-left: 4px solid #f59e0b;
-    padding-left: 8px;
-}
+    /* ── Scorecard table ── */
+    .scorecard-wrap table {
+        width: 100%;
+        border-collapse: collapse;
+        background-color: #ffffff;
+        border-radius: 10px;
+        overflow: visible;
+        display: table;
+    }
+    .scorecard-wrap th {
+        background-color: #1e3a5f;
+        color: #ffffff;
+        font-weight: 700;
+        font-size: 14px !important;
+        padding: 10px 10px !important;
+        text-align: center !important;
+        border: 1px solid #cbd5e1;
+        min-width: 42px;
+        overflow: visible;
+    }
+    .scorecard-wrap td {
+        padding: 9px 8px !important;
+        text-align: center !important;
+        border: 1px solid #cbd5e1;
+        color: #1e293b;
+        font-size: 14px !important;
+        min-width: 42px;
+        background-color: #ffffff;
+        overflow: visible;
+    }
+    .scorecard-wrap td:first-child,
+    .scorecard-wrap th:first-child {
+        text-align: left !important;
+        min-width: 90px;
+        background-color: #1e3a5f;
+        color: #ffffff;
+        position: sticky;
+        left: 0;
+        z-index: 10;
+        font-size: 14px !important;
+        overflow: visible;
+    }
+    .scorecard-wrap tr.score-row:hover td {
+        background-color: #f0f7ff;
+    }
+    .scorecard-wrap tr.score-row:hover td:first-child {
+        background-color: #163154;
+    }
+
+    /* ── Running-total sub-row ── */
+    .scorecard-wrap tr.thru-row td {
+        background-color: #f8fafc !important;
+        border-top: 1px dashed #94a3b8 !important;
+        color: #475569;
+        font-size: 13px !important;
+        padding: 5px 8px !important;
+        overflow: visible;
+    }
+    .scorecard-wrap tr.thru-row td:first-child {
+        color: #e2e8f0;
+        font-style: italic;
+        font-size: 13px !important;
+        background-color: #1e3a5f !important;
+        overflow: visible;
+    }
+
+    /* ── PGA score badges ── */
+    .badge {
+        display: inline-block;
+        width: 28px;
+        height: 28px;
+        line-height: 28px;
+        border-radius: 50%;
+        font-weight: 700;
+        font-size: 13px !important;
+        text-align: center;
+    }
+    .badge-eagle     { background: #1d4ed8; color: #fff; border-radius: 50%; }
+    .badge-birdie    { background: transparent; color: #1e293b;
+                       border: 2px solid #dc2626; border-radius: 50%; }
+    .badge-par       { color: #1e293b; }
+    .badge-bogey     { background: transparent; color: #1e293b;
+                       border: 2px solid #64748b; border-radius: 4px; }
+    .badge-double    { background: transparent; color: #dc2626;
+                       border: 2px solid #dc2626; border-radius: 4px; }
+    .badge-triple    { background: #fef2f2; color: #991b1b;
+                       border: 2px solid #dc2626; border-radius: 4px; }
+    .badge-albatross { background: #7c3aed; color: #fff; border-radius: 50%; }
+
+    /* ── Running total colours ── */
+    .run-under { color: #16a34a; font-weight: 600; }
+    .run-over  { color: #dc2626; font-weight: 600; }
+    .run-even  { color: #1e293b; font-weight: 600; }
+    .run-blank { color: #94a3b8; }
+
+    /* ── Total column highlight ── */
+    .scorecard-wrap td.total-col {
+        background-color: #fef3c7 !important;
+        font-weight: 700;
+        color: #92400e !important;
+    }
+    .scorecard-wrap tr.thru-row td.total-col {
+        background-color: #fef9ee !important;
+    }
+
+    /* ── Section label ── */
+    .section-label {
+        color: #1e3a5f;
+        font-weight: 700;
+        font-size: 15px !important;
+        margin: 20px 0 6px 0;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        border-left: 4px solid #f59e0b;
+        padding-left: 8px;
+    }
 
     /* ── Mobile ── */
     @media (max-width: 768px) {
@@ -212,18 +235,29 @@ st.markdown("""
             min-width: 100% !important;
         }
         .scorecard-wrap th,
-        .scorecard-wrap td { font-size: 12px !important; padding: 6px 4px !important; min-width: 30px !important; }
+        .scorecard-wrap td {
+            font-size: 12px !important;
+            padding: 6px 4px !important;
+            min-width: 30px !important;
+        }
         .scorecard-wrap td:first-child,
-        .scorecard-wrap th:first-child { min-width: 65px !important; }
-        .badge { width:22px; height:22px; line-height:22px; font-size:11px !important; }
+        .scorecard-wrap th:first-child {
+            min-width: 65px !important;
+        }
+        .badge {
+            width: 22px;
+            height: 22px;
+            line-height: 22px;
+            font-size: 11px !important;
+        }
         .wordle-tooltip .wordle-tooltiptext {
-            width: 140px !important; font-size: 11px !important;
-            left: 0% !important; margin-left: -70px !important;
+            width: 150px !important;
+            font-size: 11px !important;
+            top: 35% !important;
         }
     }
 </style>
 """, unsafe_allow_html=True)
-
 
 st.title("⛳ Dan and Rik's Wordle Golf")
 st.write("Welcome to the clubhouse. Drop your scores, track the board, and catch the live broadcast.")
