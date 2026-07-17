@@ -782,7 +782,6 @@ else:
         )
         wordle_paste = st.text_area(
             "Wordle Result",
-            placeholder="Wordle 1,845 4/6*\n\n⬛🟨⬛⬛⬛\n🟨⬛⬛🟩⬛\n🟩🟩🟩🟩🟩",
             height=200,
             key=paste_key,
             label_visibility="collapsed"
