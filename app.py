@@ -278,6 +278,18 @@ SCORE_NAMES = {
 PLAYERS = ["Dan", "Rik"]
 
 # ----------------------------------------------------
+# HELPER: Convert stored strokes value to guess count label
+# ----------------------------------------------------
+def strokes_to_guesses(strokes):
+    """
+    Converts a stored stroke value (relative to par, where par=4 guesses)
+    back to the actual number of guesses for display in the scorecard badge.
+    strokes: -3=1 guess, -2=2, -1=3, 0=4, 1=5, 2=6, 3=fail(X)
+    """
+    mapping = {-3: "1", -2: "2", -1: "3", 0: "4", 1: "5", 2: "6", 3: "X"}
+    return mapping.get(strokes, str(strokes))
+
+# ----------------------------------------------------
 # 2. SUPABASE CONNECTION
 # ----------------------------------------------------
 @st.cache_resource
@@ -880,7 +892,6 @@ else:
             w_num = int(manual_wordle_num)
             strokes = SCORE_MAP.get(manual_score, 0)
 
-            # Parse grid if provided
             grid_lines = []
             if manual_grid:
                 for line in manual_grid.split("\n"):
@@ -888,7 +899,6 @@ else:
                         grid_lines.append(line.strip())
             grid_visual = "\n".join(grid_lines)
 
-            # Build summary from grid if available
             if grid_visual:
                 greens = manual_grid.count("🟩")
                 yellows = manual_grid.count("🟨")
@@ -928,6 +938,7 @@ else:
 
             st.session_state.clear_paste = not st.session_state.clear_paste
             st.rerun()
+
 # ----------------------------------------------------
 # 9. DETERMINE ACTIVE ROUND
 # ----------------------------------------------------
@@ -1110,8 +1121,8 @@ else:
     st.subheader("📊 Tournament Scoreboard")
     st.caption("💡 Hover over any score to see the colour grid!")
 
-    front_9_holes   = list(range(1, 10))
-    back_9_holes    = list(range(10, 19))
+    front_9_holes = list(range(1, 10))
+    back_9_holes  = list(range(10, 19))
 
     playoff_holes_display = []
     if playoff_active or playoff_winner:
@@ -1123,15 +1134,22 @@ else:
 
     # ── helpers ──────────────────────────────────────────
     def score_badge(strokes, grid, hole, both_have, active_round_start):
-        """Return a tooltip-wrapped PGA-style badge for a raw hole score."""
-        # Badge style by score
-        if   strokes <= -3: css, label = "badge-albatross", f"{strokes:+}"
-        elif strokes == -2: css, label = "badge-eagle",     f"{strokes:+}"
-        elif strokes == -1: css, label = "badge-birdie",    f"{strokes:+}"
-        elif strokes ==  0: css, label = "badge-par",       "E"
-        elif strokes ==  1: css, label = "badge-bogey",     f"{strokes:+}"
-        elif strokes ==  2: css, label = "badge-double",    f"{strokes:+}"
-        else:               css, label = "badge-triple",    f"{strokes:+}"
+        """
+        Return a tooltip-wrapped PGA-style badge for a raw hole score.
+        The badge label shows the number of guesses (1-6 or X) rather
+        than the score relative to par.
+        """
+        # Determine badge style from strokes (relative to par)
+        if   strokes <= -3: css = "badge-albatross"
+        elif strokes == -2: css = "badge-eagle"
+        elif strokes == -1: css = "badge-birdie"
+        elif strokes ==  0: css = "badge-par"
+        elif strokes ==  1: css = "badge-bogey"
+        elif strokes ==  2: css = "badge-double"
+        else:               css = "badge-triple"
+
+        # Label shows number of guesses, not score relative to par
+        label = strokes_to_guesses(strokes)
 
         badge_html = f"<span class='badge {css}'>{label}</span>"
 
@@ -1180,15 +1198,15 @@ else:
         return "<span class='run-even'>E</span>"
 
     # ── Collect raw strokes ───────────────────────────────
-    raw_strokes   = {p: {} for p in PLAYERS}   # hole -> int|None
+    raw_strokes = {p: {} for p in PLAYERS}
     scorecard_totals = {
         p: {"total": 0, "front_9": 0, "back_9": 0, "synced": 0}
         for p in PLAYERS
     }
 
     for h in display_holes:
-        h_data     = round_scores.get(h, {})
-        both_have  = all(p in h_data for p in PLAYERS)
+        h_data    = round_scores.get(h, {})
+        both_have = all(p in h_data for p in PLAYERS)
         for player in PLAYERS:
             res = h_data.get(player)
             if res is None:
@@ -1197,8 +1215,8 @@ else:
                 strokes = res["strokes"] if isinstance(res, dict) else int(res)
                 raw_strokes[player][h] = strokes
                 if both_have and h <= 18:
-                    scorecard_totals[player]["total"]   += strokes
-                    scorecard_totals[player]["synced"]  += 1
+                    scorecard_totals[player]["total"]  += strokes
+                    scorecard_totals[player]["synced"] += 1
                     if 1 <= h <= 9:
                         scorecard_totals[player]["front_9"] += strokes
                     else:
@@ -1221,13 +1239,11 @@ else:
                 hole_cells[player][h] = "<span class='run-blank'>⏳</span>"
                 thru_cells[player][h] = run_span(0, blank=True)
             else:
-                strokes  = raw_strokes[player][h]
-                grid     = res.get("grid", "") if isinstance(res, dict) else ""
+                strokes = raw_strokes[player][h]
+                grid    = res.get("grid", "") if isinstance(res, dict) else ""
                 hole_cells[player][h] = score_badge(
                     strokes, grid, h, both_have, active_round_start
                 )
-                # Always accumulate running total for this player
-                # regardless of whether opponent has played
                 if h <= 18:
                     running += strokes
                     thru_cells[player][h] = run_span(running)
@@ -1270,7 +1286,6 @@ else:
         for player in sorted_players:
             tot = scorecard_totals[player]
 
-            # Pre-calculate run_f9 before it's needed
             run_f9 = 0
             if is_front:
                 for hh in range(1, 10):
@@ -1375,7 +1390,6 @@ st.header("🎙️ Live Broadcast Booth")
 if active_round_start is not None:
     if st.button("🎤 Get Live Commentary"):
 
-        # ── Build match context for the LLM ──
         def get_best_hole(player):
             best_h, best_s = None, 99
             for h in reg_completed_holes:
@@ -1410,7 +1424,11 @@ if active_round_start is not None:
             return count
 
         def recent_trend(player, last_n=3):
-            recent = reg_completed_holes[-last_n:] if len(reg_completed_holes) >= last_n else reg_completed_holes
+            recent = (
+                reg_completed_holes[-last_n:]
+                if len(reg_completed_holes) >= last_n
+                else reg_completed_holes
+            )
             total = 0
             for h in recent:
                 h_data = round_scores.get(h, {})
@@ -1445,23 +1463,31 @@ if active_round_start is not None:
         p1_trend   = recent_trend(p1)
         p2_trend   = recent_trend(p2)
 
-        # Build hole-by-hole summary string
         hole_summary_lines = []
         for h in reg_completed_holes:
             h_data = round_scores.get(h, {})
             p1_res = h_data.get(p1)
             p2_res = h_data.get(p2)
-            p1_s = (p1_res["strokes"] if isinstance(p1_res, dict) else int(p1_res)) if p1_res else None
-            p2_s = (p2_res["strokes"] if isinstance(p2_res, dict) else int(p2_res)) if p2_res else None
+            p1_s = (
+                (p1_res["strokes"] if isinstance(p1_res, dict) else int(p1_res))
+                if p1_res else None
+            )
+            p2_s = (
+                (p2_res["strokes"] if isinstance(p2_res, dict) else int(p2_res))
+                if p2_res else None
+            )
             if p1_s is not None and p2_s is not None:
                 hole_summary_lines.append(
                     f"  Hole {h}: {p1}={score_name(p1_s)} ({p1_s:+}), "
                     f"{p2}={score_name(p2_s)} ({p2_s:+})"
                 )
 
-        hole_summary = "\n".join(hole_summary_lines) if hole_summary_lines else "No holes completed yet."
+        hole_summary = (
+            "\n".join(hole_summary_lines)
+            if hole_summary_lines
+            else "No holes completed yet."
+        )
 
-        # Build the full context prompt
         if playoff_active:
             match_status = f"SUDDEN DEATH PLAYOFFS active at hole {current_playoff_hole}"
         elif regulation_complete:
@@ -1592,7 +1618,12 @@ else:
                         else:
                             s       = h_raw[player][h]
                             grid    = res.get("grid", "") if isinstance(res, dict) else ""
-                            clean_g = str(grid).replace("\\n", "<br>").replace("\n", "<br>").strip()
+                            clean_g = (
+                                str(grid)
+                                .replace("\\n", "<br>")
+                                .replace("\n", "<br>")
+                                .strip()
+                            )
 
                             wordle_num_for_hole = round_start + h - 1
                             raw_answer = get_wordle_answer(wordle_num_for_hole)
@@ -1603,14 +1634,17 @@ else:
                                 if answer else ""
                             )
 
-                            # Badge style
-                            if   s <= -3: css, lbl = "badge-albatross", f"{s:+}"
-                            elif s == -2: css, lbl = "badge-eagle",     f"{s:+}"
-                            elif s == -1: css, lbl = "badge-birdie",    f"{s:+}"
-                            elif s ==  0: css, lbl = "badge-par",       "E"
-                            elif s ==  1: css, lbl = "badge-bogey",     f"{s:+}"
-                            elif s ==  2: css, lbl = "badge-double",    f"{s:+}"
-                            else:         css, lbl = "badge-triple",    f"{s:+}"
+                            # Badge style from strokes, label from guess count
+                            if   s <= -3: css = "badge-albatross"
+                            elif s == -2: css = "badge-eagle"
+                            elif s == -1: css = "badge-birdie"
+                            elif s ==  0: css = "badge-par"
+                            elif s ==  1: css = "badge-bogey"
+                            elif s ==  2: css = "badge-double"
+                            else:         css = "badge-triple"
+
+                            # Use guess count as label instead of relative-to-par
+                            lbl = strokes_to_guesses(s)
 
                             h_cells[player][h] = (
                                 '<div class="wordle-tooltip">'
@@ -1640,7 +1674,7 @@ else:
 
                 sorted_players = sorted(PLAYERS, key=lambda p: h_tots[p]["total"])
                 for player in sorted_players:
-                    t = h_tots[player]  # ← ADD THIS LINE
+                    t = h_tots[player]
 
                     # Score row
                     ht += f"<tr class='score-row'><td><b>{player}</b></td>"
@@ -1650,9 +1684,10 @@ else:
                         f"<td>{fmt_total(t['front'])}</td>"
                         f"<td>{fmt_total(t['back'])}</td>"
                     )
-
                     for h in hist_display:
-                        ht += f"<td>{h_cells[player].get(h, '<span class=run-blank>—</span>')}</td>"
+                        ht += (
+                            f"<td>{h_cells[player].get(h, '<span class=run-blank>—</span>')}</td>"
+                        )
                     ht += "</tr>"
 
                     # Thru row
@@ -1660,7 +1695,9 @@ else:
                     ht += "<td class='total-col'></td>"
                     ht += "<td></td><td></td>"
                     for h in hist_display:
-                        ht += f"<td>{t_cells[player].get(h, '<span class=run-blank>—</span>')}</td>"
+                        ht += (
+                            f"<td>{t_cells[player].get(h, '<span class=run-blank>—</span>')}</td>"
+                        )
                     ht += "</tr>"
 
                 ht += "</tbody></table></div></div>"
