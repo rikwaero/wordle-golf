@@ -1053,6 +1053,63 @@ active_round_start = get_active_round(
     archived_rounds=st.session_state.archived_rounds  # pass archived rounds
 )
 
+# ----------------------------------------------------
+# 10. MAIN SCOREBOARD
+# ----------------------------------------------------
+st.header("🏆 Live Standings")
+
+if active_round_start is None:
+    st.info("⛳ No scores yet. Log in and post your first Wordle result!")
+else:
+    active_round_end = active_round_start + 17
+    st.subheader(f"Current Round: Wordle {active_round_start} – {active_round_end}")
+
+    round_scores = get_scores_for_round(all_scores, active_round_start)
+
+    p1, p2 = PLAYERS[0], PLAYERS[1]
+
+    # Compute regulation totals (holes 1-18, both players synced)
+    reg_completed_holes = []
+    reg_totals = {p1: 0, p2: 0}
+
+    for h in range(1, 19):
+        h_data = round_scores.get(h, {})
+        s1_data = h_data.get(p1)
+        s2_data = h_data.get(p2)
+        s1 = s1_data["strokes"] if isinstance(s1_data, dict) else s1_data
+        s2 = s2_data["strokes"] if isinstance(s2_data, dict) else s2_data
+        if s1 is not None and s2 is not None:
+            reg_completed_holes.append(h)
+            reg_totals[p1] += s1
+            reg_totals[p2] += s2
+
+    regulation_finished = len(reg_completed_holes)
+    regulation_complete = regulation_finished == 18
+
+    # Playoff sudden death logic
+    playoff_active = False
+    playoff_winner = None
+    current_playoff_hole = 19
+
+    if regulation_complete and reg_totals[p1] == reg_totals[p2]:
+        playoff_active = True
+        while True:
+            h_data = round_scores.get(current_playoff_hole, {})
+            s1_data = h_data.get(p1)
+            s2_data = h_data.get(p2)
+            s1_p = s1_data["strokes"] if isinstance(s1_data, dict) else s1_data
+            s2_p = s2_data["strokes"] if isinstance(s2_data, dict) else s2_data
+
+            if s1_p is not None and s2_p is not None:
+                if s1_p < s2_p:
+                    playoff_winner = p1
+                    break
+                elif s2_p < s1_p:
+                    playoff_winner = p2
+                    break
+                current_playoff_hole += 1
+            else:
+                break
 
     # ----------------------------------------------------
     # 11. CHAMPIONSHIP RESOLUTIONS
