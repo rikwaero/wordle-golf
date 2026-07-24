@@ -504,6 +504,34 @@ def is_practice_hole(hole_num):
     """Returns True if the hole is a practice hole (19 or 20)."""
     return hole_num in (19, 20)
 
+def get_next_round_start(current_round_start):
+    """
+    Given a round start (e.g. 1841), returns the next round start
+    20 puzzles later (e.g. 1861), validating it meets the naming convention.
+    """
+    candidate = current_round_start + 20
+
+    # Validate it meets your round-start convention
+    # (ends in 1, second-to-last digit is even)
+    c_str = str(candidate)
+    last_digit = int(c_str[-1])
+    second_last_digit = int(c_str[-2]) if len(c_str) >= 2 else 0
+
+    if last_digit == 1 and second_last_digit % 2 == 0:
+        return candidate
+
+    # If convention not met, search nearby for valid start
+    for offset in range(-2, 3):
+        check = candidate + offset
+        c_str = str(check)
+        last_digit = int(c_str[-1])
+        second_last = int(c_str[-2]) if len(c_str) >= 2 else 0
+        if last_digit == 1 and second_last % 2 == 0:
+            return check
+
+    # Fallback: return candidate as-is
+    return candidate
+
 def get_all_rounds_from_scores(scores_dict):
     """
     Given the full scores dict, returns a sorted list of unique round start numbers.
@@ -632,6 +660,28 @@ def safe_answer_display(answer):
     if not re.match(r"^[A-Za-z]{5}$", str(answer)):
         return None
     return answer.upper()
+
+def save_archived_rounds_to_supabase(archived_rounds):
+    """Saves the list of archived round starts to Supabase."""
+    try:
+        supabase.table("game_state").upsert({
+            "key": "archived_rounds",
+            "value": json.dumps(archived_rounds)
+        }).execute()
+    except Exception as e:
+        st.error(f"Failed to save archived rounds: {e}")
+
+def load_archived_rounds_from_supabase():
+    """Loads the list of archived round starts from Supabase."""
+    try:
+        result = supabase.table("game_state").select("value").eq(
+            "key", "archived_rounds"
+        ).execute()
+        if result.data:
+            return json.loads(result.data[0]["value"])
+        return []
+    except Exception:
+        return []
 
 # ----------------------------------------------------
 # 6. SESSION STATE INITIALIZATION
@@ -942,11 +992,17 @@ else:
 # ----------------------------------------------------
 # 9. DETERMINE ACTIVE ROUND
 # ----------------------------------------------------
-def get_active_round(scores_dict, players):
+def get_active_round(scores_dict, players, archived_rounds=None):
     """
-    Returns the most recent round start where both players
-    have at least one score entry.
+    Returns the most recent NON-ARCHIVED round start where both players
+    have at least one score entry. Falls back to next expected round
+    if all rounds with scores are archived.
     """
+    if archived_rounds is None:
+        archived_rounds = []
+
+    archived_set = set(int(r) for r in archived_rounds)
+
     clean_scores = {}
     for k, v in scores_dict.items():
         try:
@@ -956,7 +1012,10 @@ def get_active_round(scores_dict, players):
 
     all_rounds = get_all_rounds_from_scores(clean_scores)
 
-    for round_start in reversed(all_rounds):
+    # Filter out archived rounds
+    active_rounds = [r for r in all_rounds if r not in archived_set]
+
+    for round_start in reversed(active_rounds):
         round_scores = get_scores_for_round(clean_scores, round_start)
         players_in_round = set()
         for hole_data in round_scores.values():
@@ -964,9 +1023,20 @@ def get_active_round(scores_dict, players):
         if all(p in players_in_round for p in players):
             return round_start
 
-    if all_rounds:
-        return all_rounds[-1]
+    # No active rounds with scores found - calculate next round
+    # after the most recently archived round
+    if archived_set:
+        most_recent_archived = max(archived_set)
+        return get_next_round_start(most_recent_archived)
+
+    if active_rounds:
+        return active_rounds[-1]
+
     return None
+
+# Load archived rounds into session state if not already loaded
+if "archived_rounds" not in st.session_state:
+    st.session_state.archived_rounds = load_archived_rounds_from_supabase()
 
 # Ensure all score keys are integers
 all_scores = {}
@@ -977,65 +1047,12 @@ for k, v in st.session_state.scores.items():
         continue
 
 all_round_starts = get_all_rounds_from_scores(all_scores)
-active_round_start = get_active_round(all_scores, PLAYERS)
+active_round_start = get_active_round(
+    all_scores,
+    PLAYERS,
+    archived_rounds=st.session_state.archived_rounds  # pass archived rounds
+)
 
-# ----------------------------------------------------
-# 10. MAIN SCOREBOARD
-# ----------------------------------------------------
-st.header("🏆 Live Standings")
-
-if active_round_start is None:
-    st.info("⛳ No scores yet. Log in and post your first Wordle result!")
-else:
-    active_round_end = active_round_start + 17
-    st.subheader(f"Current Round: Wordle {active_round_start} – {active_round_end}")
-
-    round_scores = get_scores_for_round(all_scores, active_round_start)
-
-    p1, p2 = PLAYERS[0], PLAYERS[1]
-
-    # Compute regulation totals (holes 1-18, both players synced)
-    reg_completed_holes = []
-    reg_totals = {p1: 0, p2: 0}
-
-    for h in range(1, 19):
-        h_data = round_scores.get(h, {})
-        s1_data = h_data.get(p1)
-        s2_data = h_data.get(p2)
-        s1 = s1_data["strokes"] if isinstance(s1_data, dict) else s1_data
-        s2 = s2_data["strokes"] if isinstance(s2_data, dict) else s2_data
-        if s1 is not None and s2 is not None:
-            reg_completed_holes.append(h)
-            reg_totals[p1] += s1
-            reg_totals[p2] += s2
-
-    regulation_finished = len(reg_completed_holes)
-    regulation_complete = regulation_finished == 18
-
-    # Playoff sudden death logic
-    playoff_active = False
-    playoff_winner = None
-    current_playoff_hole = 19
-
-    if regulation_complete and reg_totals[p1] == reg_totals[p2]:
-        playoff_active = True
-        while True:
-            h_data = round_scores.get(current_playoff_hole, {})
-            s1_data = h_data.get(p1)
-            s2_data = h_data.get(p2)
-            s1_p = s1_data["strokes"] if isinstance(s1_data, dict) else s1_data
-            s2_p = s2_data["strokes"] if isinstance(s2_data, dict) else s2_data
-
-            if s1_p is not None and s2_p is not None:
-                if s1_p < s2_p:
-                    playoff_winner = p1
-                    break
-                elif s2_p < s1_p:
-                    playoff_winner = p2
-                    break
-                current_playoff_hole += 1
-            else:
-                break
 
     # ----------------------------------------------------
     # 11. CHAMPIONSHIP RESOLUTIONS
